@@ -47,6 +47,11 @@ class IncidentState(BaseModel):
     bank_name: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
     transaction_reference: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
     suspect_contact: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
+    platform: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
+    item: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
+    promised_work: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
+    app_name: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
+    threats_received: FieldValue = Field(default_factory=lambda: FieldValue(status=FieldStatus.MISSING))
     missing_information: list[str] = Field(default_factory=list)
 
 
@@ -137,12 +142,32 @@ class CybercrimeIncidentAnalysis(BaseModel):
 # ══════════════════════════════════════════════
 CATEGORY_FIELD_PRIORITIES = {
     "OTP_FRAUD": [
-        "financial_loss",
-        "bank_name",
-        "transaction_reference",
-        "suspect_contact",
-        "incident_date",
-        "payment_method",
+        "financial_loss",        # 1. amount lost
+        "incident_date",         # 2. date/time
+        "bank_name",             # 3. bank
+        "transaction_reference", # 4. transaction reference
+        "suspect_contact",       # 5. suspected contact details
+    ],
+    "OLX_SCAM": [
+        "platform",              # 1. platform
+        "item",                  # 2. item
+        "payment_method",        # 3. payment made
+        "financial_loss",        # 4. amount
+        "transaction_reference", # 5. transaction reference
+        "suspect_contact",       # 6. suspect contact
+    ],
+    "JOB_SCAM": [
+        "platform",              # 1. job platform
+        "suspect_contact",       # 2. recruiter contact
+        "financial_loss",        # 3. amount paid
+        "promised_work",         # 4. promised work
+        "transaction_reference", # 5. payment proof
+    ],
+    "LOAN_FRAUD": [
+        "app_name",              # 1. app name
+        "financial_loss",        # 2. amount paid or demanded
+        "threats_received",      # 3. threats received
+        "suspect_contact",       # 4. relevant contact details
     ],
     "PHISHING": [
         "financial_loss",
@@ -150,65 +175,75 @@ CATEGORY_FIELD_PRIORITIES = {
         "suspect_contact",
         "transaction_reference",
         "incident_date",
-        "payment_method",
-    ],
-    "OLX_SCAM": [
-        "financial_loss",
-        "suspect_contact",
-        "payment_method",
-        "transaction_reference",
-        "incident_date",
-    ],
-    "JOB_SCAM": [
-        "financial_loss",
-        "suspect_contact",
-        "payment_method",
-        "transaction_reference",
-        "incident_date",
-    ],
-    "LOAN_FRAUD": [
-        "suspect_contact",
-        "financial_loss",
-        "payment_method",
-        "incident_date",
-        "transaction_reference",
     ],
     "GENERAL_FRAUD": [
         "financial_loss",
+        "incident_date",
         "suspect_contact",
         "payment_method",
-        "incident_date",
         "transaction_reference",
     ],
 }
 
 SINGLE_QUESTIONS = {
+    # ── Amount Lost / Demanded ──
     "financial_loss": {
         "hi": "कृपया बताएं कि इस धोखाधड़ी में आपका कुल कितने रुपये का नुकसान हुआ है?",
-        "en": "Please tell us the total amount of financial loss incurred in this incident.",
+        "en": "Please state the total amount of money lost or debited from your account.",
         "clarify_hi": "क्या आप बता सकते हैं कि लगभग कितने रुपये का नुकसान हुआ है?",
         "clarify_en": "Could you please clarify approximately how much money was debited or lost?",
     },
+    # ── Date / Time ──
+    "incident_date": {
+        "hi": "यह घटना किस तारीख और लगभग किस समय पर हुई थी?",
+        "en": "On what date and approximately what time did this incident occur?",
+    },
+    # ── Bank Name ──
     "bank_name": {
         "hi": "धोखाधड़ी किस बैंक के खाते से हुई है, कृपया अपने बैंक का नाम बताएं?",
-        "en": "Which bank was your affected account with? Please share your bank's name.",
+        "en": "Which bank was your affected account with? Please state your bank's name.",
     },
-    "suspect_contact": {
-        "hi": "क्या आपके पास धोखाधड़ी करने वाले का फोन नंबर, नाम, या यूपीआई आईडी है?",
-        "en": "Do you have any details of the fraudster, such as their phone number, UPI ID, or name?",
-    },
+    # ── Transaction Reference / Payment Proof ──
     "transaction_reference": {
-        "hi": "क्या आपके पास बैंक संदेश में आया हुआ कोई UTR नंबर या ट्रांजेक्शन आईडी है?",
-        "en": "Do you have any transaction reference or UTR number from your bank message?",
+        "hi": "क्या आपके पास बैंक संदेश या ऐप में आया हुआ कोई UTR नंबर या ट्रांजेक्शन आईडी है?",
+        "en": "Do you have the bank UTR number, transaction reference ID, or payment proof?",
     },
+    # ── Suspect Contact Details ──
+    "suspect_contact": {
+        "hi": "क्या आपके पास धोखाधड़ी करने वाले का फोन नंबर, नाम या यूपीआई आईडी है?",
+        "en": "Do you have any contact details of the suspect, such as their phone number, UPI ID, or name?",
+    },
+    # ── Platform (Marketplace / Job) ──
+    "platform": {
+        "hi": "यह धोखाधड़ी किस ऑनलाइन प्लेटफॉर्म पर हुई, जैसे ओएलएक्स, फेसबुक मार्केटप्लेस, या टेलीग्राम?",
+        "en": "Which online platform did this occur on, such as OLX, Facebook Marketplace, or Telegram?",
+    },
+    # ── Item Bought / Sold ──
+    "item": {
+        "hi": "आप किस सामान या वस्तु को खरीदने या बेचने का प्रयास कर रहे थे?",
+        "en": "What specific item or product were you attempting to buy or sell?",
+    },
+    # ── Payment Method Made ──
     "payment_method": {
-        "hi": "पैसे किस माध्यम से कटे या भेजे गए, जैसे यूपीआई, नेट बैंकिंग, या कार्ड?",
-        "en": "How was the payment made, for example through UPI, net banking, or card?",
+        "hi": "पैसे किस माध्यम से भेजे या कटे थे, जैसे क्यूआर कोड स्कैन करके या यूपीआई ऐप से?",
+        "en": "How was the payment made, for example by scanning a QR code or via a UPI app?",
     },
-    "incident_date": {
-        "hi": "कृपया बताएं कि यह घटना किस तारीख या दिन घटी थी?",
-        "en": "Could you specify the date or day when this incident occurred?",
+    # ── Promised Work (Job / Task Scam) ──
+    "promised_work": {
+        "hi": "आपको किस प्रकार के काम या टास्क का वादा किया गया था, जैसे यूट्यूब लाइक, रिव्यू या डेटा एंट्री?",
+        "en": "What type of work or earnings were promised, such as YouTube likes, reviews, or data entry tasks?",
     },
+    # ── Loan App Name ──
+    "app_name": {
+        "hi": "उस फर्जी लोन ऐप का नाम क्या है जिसे आपने डाउनलोड या अप्लाई किया था?",
+        "en": "What is the exact name of the loan application you downloaded or applied through?",
+    },
+    # ── Threats Received (Extortion / Blackmail) ──
+    "threats_received": {
+        "hi": "आपको किस प्रकार की धमकियां या ब्लैकमेलिंग का सामना करना पड़ा है, जैसे कॉन्टैक्ट लिस्ट पर कॉल करना?",
+        "en": "What specific threats or extortion have you experienced, such as contact list misuse or harassment?",
+    },
+    # ── All Evidentiary Details Satisfied ──
     "all_collected": {
         "hi": "क्या इस घटना से संबंधित कोई अन्य प्रमाण या संदेश आपके पास उपलब्ध है?",
         "en": "Do you have any other evidentiary details or records regarding this incident?",
@@ -477,6 +512,59 @@ def extract_facts_from_text(
         if caller_match:
             v_name = caller_match.group(1).strip(" .।हैहे")
 
+    # 9. Extract Platform
+    platform = None
+    if re.search(r"\b(olx|ओएलएक्स)\b", clean):
+        platform = "OLX"
+    elif re.search(r"\b(telegram|टेलीग्राम)\b", clean):
+        platform = "Telegram"
+    elif re.search(r"\b(whatsapp|व्हाट्सएप|व्हाट्सऐप)\b", clean):
+        platform = "WhatsApp"
+    elif re.search(r"\b(facebook marketplace|quikr|क्विकर|instagram)\b", clean):
+        platform = "Marketplace"
+
+    # 10. Extract Marketplace Item
+    item = None
+    item_match = re.search(r"(?:bech|sell|buy|kharid|खरीद|बेच|for sale|buying|selling)\s*(?:raha|rahe|tha|thi)?\s*[:\-]?\s*([A-Za-z\u0900-\u097F]{3,20}(?:\s+[A-Za-z\u0900-\u097F]{3,20})?)", combined, re.IGNORECASE)
+    if item_match:
+        item = item_match.group(1).strip()
+    elif any(w in clean for w in ["phone", "mobile", "फोन", "मोबाइल"]):
+        item = "Mobile Phone"
+    elif any(w in clean for w in ["car", "bike", "गाड़ी", "कार", "बाइक"]):
+        item = "Vehicle"
+    elif any(w in clean for w in ["laptop", "लैपटॉप"]):
+        item = "Laptop"
+
+    # 11. Extract Promised Work / Task Scheme
+    promised_work = None
+    if any(w in clean for w in ["youtube like", "like task", "लाइक", "यूट्यूब लाइक"]):
+        promised_work = "YouTube Like / Subscribe Tasks"
+    elif any(w in clean for w in ["review", "rating", "रिव्यू", "रेटिंग"]):
+        promised_work = "Online Review Tasks"
+    elif any(w in clean for w in ["data entry", "डेटा एंट्री", "typing"]):
+        promised_work = "Data Entry / Typing Job"
+    elif any(w in clean for w in ["prepaid", "task", "टास्क", "commission"]):
+        promised_work = "Prepaid Commission Tasks"
+
+    # 12. Extract Loan App Name
+    app_name = None
+    app_match = re.search(r"([A-Za-z\u0900-\u097F0-9]{3,20})\s*(?:loan\s*app|app|ऐप|लोन\s*ऐप)", combined, re.IGNORECASE)
+    if app_match and app_match.group(1).lower() not in ["fake", "this", "the", "an", "instant", "yeh", "फर्जी", "यह", "एक"]:
+        app_name = f"{app_match.group(1).strip()} App"
+    elif category == "LOAN_FRAUD":
+        gen_loan = re.search(r"(?:ऐप\s*का\s*नाम|app\s*name\s*is|called|named)\s*[:\-]?\s*([A-Za-z\u0900-\u097F0-9]{3,20})", combined, re.IGNORECASE)
+        if gen_loan:
+            app_name = gen_loan.group(1).strip()
+
+    # 13. Extract Threats / Harassment Received
+    threats_received = None
+    if any(w in clean for w in ["gallery", "photo", "तस्वीर", "तस्वीरें", "फोटो", "morph"]):
+        threats_received = "Threatening to circulate morphed photos"
+    elif any(w in clean for w in ["contact", "contacts", "कॉन्टैक्ट", "रिश्तेदार", "relatives"]):
+        threats_received = "Calling and harassing contact list"
+    elif any(w in clean for w in ["blackmail", "threat", "extortion", "धमकी", "ब्लैकमेल", "गाली"]):
+        threats_received = "Abusive calls and extortion threats"
+
     return {
         "victim_name": v_name,
         "incident_description": combined,
@@ -491,6 +579,11 @@ def extract_facts_from_text(
         "account_number": account_number,
         "transaction_reference": txn_ref,
         "suspect_contact": suspect_contact,
+        "platform": platform,
+        "item": item,
+        "promised_work": promised_work,
+        "app_name": app_name,
+        "threats_received": threats_received,
         "suspect_names": suspect_names,
         "suspect_phones": suspect_phones,
         "suspect_upis": suspect_upis,
@@ -591,24 +684,55 @@ def merge_extracted_facts(
         state.suspect_contact.value = s_contact
         state.suspect_contact.status = FieldStatus.COLLECTED
 
-    # 12. If target field was explicitly answered and not marked unknown/clarification
+    # 12. Merge category-specific fields
+    plt = extracted.get("platform")
+    if plt and state.platform.status != FieldStatus.COLLECTED:
+        state.platform.value = plt
+        state.platform.status = FieldStatus.COLLECTED
+
+    itm = extracted.get("item")
+    if itm and state.item.status != FieldStatus.COLLECTED:
+        state.item.value = itm
+        state.item.status = FieldStatus.COLLECTED
+
+    pw = extracted.get("promised_work")
+    if pw and state.promised_work.status != FieldStatus.COLLECTED:
+        state.promised_work.value = pw
+        state.promised_work.status = FieldStatus.COLLECTED
+
+    an = extracted.get("app_name")
+    if an and state.app_name.status != FieldStatus.COLLECTED:
+        state.app_name.value = an
+        state.app_name.status = FieldStatus.COLLECTED
+
+    tr = extracted.get("threats_received")
+    if tr and state.threats_received.status != FieldStatus.COLLECTED:
+        state.threats_received.value = tr
+        state.threats_received.status = FieldStatus.COLLECTED
+
+    # 13. If target field was explicitly answered and not marked unknown/clarification
     if target_field and clean_raw and not is_unknown_response(clean_raw):
         field_obj = getattr(state, target_field, None)
         if field_obj and field_obj.status == FieldStatus.MISSING:
             field_obj.value = clean_raw
             field_obj.status = FieldStatus.COLLECTED
 
-    # 13. Recompute missing information based on category priorities
+    # 14. Recompute missing information based on category priorities
     category = state.primary_fraud_category.value or "GENERAL_FRAUD"
     priorities = CATEGORY_FIELD_PRIORITIES.get(category, CATEGORY_FIELD_PRIORITIES["GENERAL_FRAUD"])
     missing_list = []
     field_labels = {
-        "financial_loss": "Financial loss amount",
-        "bank_name": "Victim bank name",
-        "suspect_contact": "Suspect phone number, UPI ID, or name",
-        "transaction_reference": "Transaction UTR or Reference Number",
-        "payment_method": "Payment method",
+        "financial_loss": "Financial loss or demanded amount",
         "incident_date": "Incident date and time",
+        "bank_name": "Victim bank name",
+        "transaction_reference": "Transaction reference or payment proof",
+        "suspect_contact": "Suspect contact details",
+        "platform": "Online platform name",
+        "item": "Marketplace item/product details",
+        "payment_method": "Payment method used",
+        "promised_work": "Promised work or task description",
+        "app_name": "Fraudulent loan app name",
+        "threats_received": "Extortion or harassment details",
     }
     for f in priorities:
         f_val = getattr(state, f, None)

@@ -71,20 +71,22 @@ def test_missing_information_detection():
 #  TEST 3: CONTEXT-AWARE FOLLOW-UP QUESTIONS
 # ══════════════════════════════════════════════
 def test_context_aware_followup_question_hindi():
-    """Verify Hindi questions target missing data including date/time and suspect details."""
+    """Verify Hindi questions target missing data according to category priority."""
     story_no_loss = "ओएलएक्स पर खरीदार ने एक क्यूआर कोड भेजा।"
     res = fallback_deterministic_analysis(story_no_loss, language="hi")
 
-    assert "नुकसान" in res.follow_up_question or "रुपये" in res.follow_up_question or "तारीख" in res.follow_up_question
+    # In OLX scam, platform is already identified ("ओएलएक्स"), so next priority is item or payment method
+    assert "सामान" in res.follow_up_question or "वस्तु" in res.follow_up_question or "नुकसान" in res.follow_up_question or "माध्यम" in res.follow_up_question
 
 
 def test_context_aware_followup_question_english():
-    """Verify English questions target missing data including date/time and suspect details."""
+    """Verify English questions target missing data including app name and suspect details."""
     story = "I lost Rs 5000 in a fake loan app."
     res = fallback_deterministic_analysis(story, language="en")
 
     assert "?" in res.follow_up_question
-    assert "details" in res.follow_up_question.lower() or "phone" in res.follow_up_question.lower() or "fraudster" in res.follow_up_question.lower() or "contact" in res.follow_up_question.lower()
+    # For Loan App fraud, loss is known, highest priority missing field is app name or threats
+    assert "name" in res.follow_up_question.lower() or "app" in res.follow_up_question.lower() or "threat" in res.follow_up_question.lower() or "details" in res.follow_up_question.lower()
 
 
 # ══════════════════════════════════════════════
@@ -98,9 +100,12 @@ def test_bank_fraud_followup_question_hindi():
     q = res.follow_up_question
     # Asks for highest priority missing field (financial loss)
     assert "नुकसान" in q or "रुपये" in q
-    # When loss is provided, asks for bank name
+    # When loss is provided, asks for incident date/time (priority #2)
     res2 = fallback_deterministic_analysis(story + " 25000 रुपये का नुकसान हुआ", language="hi")
-    assert "बैंक का नाम" in res2.follow_up_question
+    assert "तारीख" in res2.follow_up_question
+    # When loss and date are provided, asks for bank name (priority #3)
+    res3 = fallback_deterministic_analysis(story + " 25000 रुपये का नुकसान हुआ कल दोपहर में", language="hi")
+    assert "बैंक का नाम" in res3.follow_up_question
 
 
 def test_bank_fraud_followup_question_english():
@@ -109,10 +114,13 @@ def test_bank_fraud_followup_question_english():
     res = fallback_deterministic_analysis(story, language="en")
 
     q = res.follow_up_question.lower()
-    assert "financial loss" in q or "amount" in q
-    # When loss is provided, asks for bank name
+    assert "amount" in q or "debited" in q or "lost" in q
+    # When loss is provided, asks for incident date/time (priority #2)
     res2 = fallback_deterministic_analysis(story + " lost 25000 rupees", language="en")
-    assert "bank" in res2.follow_up_question.lower()
+    assert "date" in res2.follow_up_question.lower()
+    # When loss and date are provided, asks for bank name (priority #3)
+    res3 = fallback_deterministic_analysis(story + " lost 25000 rupees yesterday at 2 PM", language="en")
+    assert "bank" in res3.follow_up_question.lower()
 
 
 def test_bank_and_criminal_details_extraction():

@@ -304,7 +304,8 @@ def test_confirm_interview_with_hash_generates_reports():
 
     assert sessions[sid]["status"] == "COMPLETED"
     assert "<Hangup/>" in xml
-    assert "1930" in xml
+    assert "बैंक" in xml
+    assert "1930" not in xml
 
     pdf_path = sessions[sid].get("pdf_path")
     json_path = sessions[sid].get("json_path")

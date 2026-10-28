@@ -391,7 +391,8 @@ def test_confirm_interview_and_auto_save():
     response = client.post("/confirm-interview", data={"CallSid": sid, "Digits": "1"})
     assert response.status_code == 200
     assert "<Hangup/>" in response.text
-    assert "1930" in response.text
+    assert "bank" in response.text.lower()
+    assert "1930" not in response.text
     assert sessions[sid]["status"] == "COMPLETED"
 
 

@@ -431,7 +431,8 @@ def test_select_delivery_option_1_sms(mock_sms):
         text = response.text
 
         assert "एसएमएस के माध्यम से" in text
-        assert "1930" in text
+        assert "बैंक" in text
+        assert "1930" not in text
         assert "<Hangup/>" in text
         mock_sms.assert_called_once()
         assert is_delivery_already_dispatched(sid, "sms") is True
@@ -466,7 +467,8 @@ def test_select_delivery_option_2_whatsapp(mock_wa):
         text = response.text
 
         assert "WhatsApp" in text
-        assert "1930" in text
+        assert "bank" in text.lower()
+        assert "1930" not in text
         assert "<Hangup/>" in text
         mock_wa.assert_called_once()
         assert is_delivery_already_dispatched(sid, "whatsapp") is True
@@ -494,7 +496,8 @@ def test_select_delivery_option_3_declined(mock_wa, mock_sms):
     text = response.text
 
     assert "कोई लिंक नहीं भेजा जाएगा" in text
-    assert "1930" in text
+    assert "बैंक" in text
+    assert "1930" not in text
     assert "<Hangup/>" in text
     mock_sms.assert_not_called()
     mock_wa.assert_not_called()

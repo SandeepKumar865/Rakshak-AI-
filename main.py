@@ -1153,8 +1153,7 @@ async def confirm_interview(request: Request):
             "व्हाट्सएप पर लिंक के लिए 2 दबाएं, या लिंक नहीं चाहिए तो 3 दबाएं।"
         )
         fallback_closing = (
-            say("कृपया तुरंत 1930 साइबर हेल्पलाइन पर कॉल करें और cybercrime.gov.in पर रिपोर्ट दर्ज करें।", language="hi")
-            + say("अपने बैंक को तत्काल सूचित करके अपना खाता और कार्ड सुरक्षित करवाएं।", language="hi")
+            say("अपने बैंक को तत्काल सूचित करके अपना खाता और कार्ड सुरक्षित करवाएं।", language="hi")
             + say("रक्षक एआई से जुड़ने के लिए धन्यवाद। सतर्क रहें, सुरक्षित रहें।", language="hi")
             + "<Hangup/>"
         )
@@ -1164,8 +1163,7 @@ async def confirm_interview(request: Request):
             "To receive your report link: Press 1 for SMS, Press 2 for WhatsApp, or Press 3 for no link."
         )
         fallback_closing = (
-            say("Please dial 1930 immediately to report to the National Cyber Crime Helpline.", language="en")
-            + say("Contact your bank immediately to block any compromised cards or accounts.", language="en")
+            say("Contact your bank immediately to block any compromised cards or accounts.", language="en")
             + say("Thank you for using Rakshak AI. Stay vigilant and stay safe.", language="en")
             + "<Hangup/>"
         )
@@ -1320,13 +1318,11 @@ async def select_delivery(request: Request):
     # Emergency guidance + Closing
     if lang == "hi":
         closing_advice = (
-            "कृपया तुरंत 1930 राष्ट्रीय साइबर हेल्पलाइन पर कॉल करें और cybercrime.gov.in पर रिपोर्ट दर्ज करें। "
             "अपने बैंक को तत्काल सूचित करके अपना खाता और कार्ड सुरक्षित करवाएं। "
             "रक्षक एआई से जुड़ने के लिए धन्यवाद। सतर्क रहें, सुरक्षित रहें।"
         )
     else:
         closing_advice = (
-            "Please dial 1930 immediately to report to the National Cyber Crime Helpline and visit cybercrime.gov.in. "
             "Contact your bank immediately to block any compromised cards or accounts. "
             "Thank you for using Rakshak AI. Stay vigilant and stay safe."
         )

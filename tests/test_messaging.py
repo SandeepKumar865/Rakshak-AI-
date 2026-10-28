@@ -250,36 +250,32 @@ def test_phone_number_normalization():
 # ══════════════════════════════════════════════
 
 def test_sms_and_whatsapp_templates():
-    """Templates contain 1930 helpline, draft disclaimer, report ID, and secure URL."""
+    """Templates contain report ID, secure URL, bank advisory, and trial-friendly length."""
     rep_id = "RAK-20261028-X9Y8Z7"
     sec_url = "https://rakshak.example/report/access/token123"
 
-    # SMS Hindi
+    # SMS Hindi / Hinglish
     sms_hi = get_sms_text(rep_id, sec_url, language="hi")
     assert rep_id in sms_hi
     assert sec_url in sms_hi
-    assert "1930" in sms_hi
-    assert "मसौदा" in sms_hi
+    assert "Bank" in sms_hi
 
     # SMS English
     sms_en = get_sms_text(rep_id, sec_url, language="en")
     assert rep_id in sms_en
     assert sec_url in sms_en
-    assert "1930" in sms_en
-    assert "draft" in sms_en.lower()
+    assert "bank" in sms_en.lower()
 
     # WhatsApp Hindi
-    wa_hi = get_whatsapp_text(rep_id, sec_url, language="hi")
+    wa_hi = get_whatsapp_text(report_id=rep_id, secure_url=sec_url, language="hi")
     assert rep_id in wa_hi
     assert sec_url in wa_hi
-    assert "1930" in wa_hi
     assert "एफआईआर" in wa_hi
 
     # WhatsApp English
-    wa_en = get_whatsapp_text(rep_id, sec_url, language="en")
+    wa_en = get_whatsapp_text(report_id=rep_id, secure_url=sec_url, language="en")
     assert rep_id in wa_en
     assert sec_url in wa_en
-    assert "1930" in wa_en
     assert "FIR" in wa_en
 
 

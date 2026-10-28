@@ -250,24 +250,22 @@ def is_valid_e164(phone: str) -> bool:
 # ══════════════════════════════════════════════
 
 def get_sms_text(report_id: str, secure_url: str, language: str = "hi") -> str:
-    """Generates concise, compliant SMS body with secure link and draft disclaimer."""
+    """Generates concise, GSM-7 compliant SMS body compatible with trial segment limits."""
     if language == "hi":
         return (
-            f"रक्षक एआई (Rakshak AI): आपकी साइबर शिकायत रिपोर्ट ({report_id}) तैयार है।\n"
-            f"सुरक्षित लिंक (24 घंटे वैध): {secure_url}\n"
-            f"यह एक मसौदा रिपोर्ट है। तत्काल 1930 राष्ट्रीय साइबर हेल्पलाइन पर कॉल करें "
-            f"और बैंक को खाता/कार्ड फ्रीज करने हेतु सूचित करें।"
+            f"Rakshak AI: Aapki cyber crime report ({report_id}) taiyar hai.\n"
+            f"Download Link: {secure_url}\n"
+            f"Bank ko suchit karein v card/khata secure karwayein."
         )
     return (
         f"Rakshak AI: Your cyber incident report ({report_id}) is ready.\n"
-        f"Secure Link (valid 24h): {secure_url}\n"
-        f"This is an intake draft, not an official police complaint. "
-        f"Call 1930 Cyber Helpline & notify your bank immediately."
+        f"Download Link: {secure_url}\n"
+        f"Contact your bank immediately to secure accounts."
     )
 
 
 def get_whatsapp_text(report_id: str, secure_url: str, language: str = "hi") -> str:
-    """Generates formatted WhatsApp body with clear headers, draft disclaimer, and helpline info."""
+    """Generates formatted WhatsApp body with clear headers, draft disclaimer, and security advice."""
     if language == "hi":
         return (
             f"🛡️ *रक्षक एआई — साइबर अपराध रिपोर्ट मसौदा*\n\n"
@@ -275,9 +273,7 @@ def get_whatsapp_text(report_id: str, secure_url: str, language: str = "hi") -> 
             f"• रिपोर्ट संदर्भ: *{report_id}*\n"
             f"• सुरक्षित डाउनलोड लिंक: {secure_url}\n\n"
             f"⚠️ *महत्वपूर्ण कानूनी सूचना:*\n"
-            f"यह केवल एक सहायता रिपोर्ट (Draft) है, आधिकारिक एफआईआर (FIR) नहीं। "
-            f"कानूनी शिकायत के लिए तुरंत *1930* राष्ट्रीय साइबर हेल्पलाइन पर कॉल करें "
-            f"या www.cybercrime.gov.in पर दर्ज करें।\n\n"
+            f"यह केवल एक सहायता रिपोर्ट मसौदा (Draft) है, आधिकारिक एफआईआर नहीं।\n\n"
             f"तत्काल अपने बैंक से संपर्क करके संदिग्ध खाता या कार्ड ब्लॉक करवाएं।"
         )
     return (
@@ -286,9 +282,7 @@ def get_whatsapp_text(report_id: str, secure_url: str, language: str = "hi") -> 
         f"• Report Reference: *{report_id}*\n"
         f"• Secure Download Link: {secure_url}\n\n"
         f"⚠️ *Important Legal Notice:*\n"
-        f"This document is an assistance draft, not an official police FIR. "
-        f"To file an official complaint, immediately call the National Cyber Crime Helpline *1930* "
-        f"or register at www.cybercrime.gov.in.\n\n"
+        f"This document is an assistance draft, not an official police FIR.\n\n"
         f"Notify your bank immediately to block any compromised cards or accounts."
     )
 

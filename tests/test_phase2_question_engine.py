@@ -282,7 +282,7 @@ def test_full_call_flow_accumulates_state_into_final_report():
         target = sessions[sid]["last_targeted_field"]
         req3 = FakeFormRequest({
             "CallSid": sid,
-            "SpeechResult": "धोखाधड़ी करने वाले का फोन नंबर 9876500000 था",
+            "SpeechResult": "धोखाधड़ी करने वाले का फोन नंबर 9876500000 था और कोई UTR नंबर नहीं है",
         })
         with patch("asyncio.to_thread", side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)):
             res3 = run_coro(step3_details(req3))
@@ -481,3 +481,197 @@ def test_four_categories_step_by_step_turn_progression():
     t4, q4 = select_next_follow_up_question(loan_state, "hi")
     assert t4 == "suspect_contact"
     assert "फोन नंबर" in q4 or "यूपीआई" in q4
+
+
+# ══════════════════════════════════════════════
+#  TEST 11: END-TO-END OTP FRAUD CALL ASKS ALL 5 QUESTIONS IN SEQUENCE
+# ══════════════════════════════════════════════
+def test_otp_fraud_multi_turn_phone_call_asks_all_questions_in_sequence():
+    """
+    Simulates a live Twilio voice call for OTP fraud:
+    - Step 1: Collects caller name.
+    - Step 2: Collects incident story (contains loss amount).
+    - Step 3 Turn 1: Asks Q2 Date/Time -> Caller answers Date/Time.
+    - Step 3 Turn 2: Asks Q3 Bank -> Caller answers Bank.
+    - Step 3 Turn 3: Asks Q4 UTR / Ref -> Caller says 'याद नहीं है'.
+    - Step 3 Turn 4: Asks Q5 Suspect details -> Caller gives suspect phone.
+    - Confirmation: After all 5 questions are handled, transitions to confirm-interview and creates report!
+    """
+    sid = "CA_OTP_FULL_INTERVIEW_99"
+    sessions[sid] = {
+        "call_sid": sid,
+        "caller_phone": "+919988776655",
+        "language": "hi",
+        "incident_state": IncidentState().model_dump(),
+        "status": "IN_PROGRESS",
+    }
+
+    with patch("llm_analyzer.GEMINI_API_KEY", ""), patch("llm_analyzer.OPENAI_API_KEY", ""), patch("asyncio.to_thread", side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)):
+        # ── 1. Name Step ──
+        req_name = FakeFormRequest({"CallSid": sid, "SpeechResult": "मेरा नाम सक्षम है"})
+        res_name = run_coro(step1_name(req_name))
+        assert res_name.status_code == 200
+        assert sessions[sid]["name"] == "सक्षम"
+
+        # ── 2. Story Step (Provides financial loss) ──
+        req_story = FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "मेरे बैंक से 25000 रुपये कट गए ओटीपी फ्रॉड में",
+        })
+        res_story = run_coro(step2_story(req_story))
+        assert res_story.status_code == 200
+        xml_story = res_story.body.decode("utf-8")
+
+        # Amount is already extracted, so Q2 Date/Time must be asked!
+        assert sessions[sid]["last_targeted_field"] == "incident_date"
+        assert "तारीख" in xml_story
+        assert 'action="/step3-details"' in xml_story
+
+        # ── 3. Turn 1: Caller answers Date/Time ──
+        req_turn1 = FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "कल दोपहर 2 बजे यह घटना हुई",
+            "Digits": "#",
+        })
+        res_turn1 = run_coro(step3_details(req_turn1))
+        assert res_turn1.status_code == 200
+        xml_turn1 = res_turn1.body.decode("utf-8")
+
+        # Must NOT exit! Must ask Q3 Bank Name!
+        assert sessions[sid]["step3_completed"] is False
+        assert sessions[sid]["last_targeted_field"] == "bank_name"
+        assert "बैंक का नाम" in xml_turn1
+        assert 'action="/step3-details"' in xml_turn1
+
+        # ── 4. Turn 2: Caller answers Bank Name ──
+        req_turn2 = FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "स्टेट बैंक ऑफ इंडिया (SBI) था",
+            "Digits": "#",
+        })
+        res_turn2 = run_coro(step3_details(req_turn2))
+        assert res_turn2.status_code == 200
+        xml_turn2 = res_turn2.body.decode("utf-8")
+
+        # Must NOT exit! Must ask Q4 Transaction Reference!
+        assert sessions[sid]["step3_completed"] is False
+        assert sessions[sid]["last_targeted_field"] == "transaction_reference"
+        assert "UTR" in xml_turn2 or "ट्रांजेक्शन" in xml_turn2
+        assert 'action="/step3-details"' in xml_turn2
+
+        # ── 5. Turn 3: Caller does not remember UTR ──
+        req_turn3 = FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "मुझे याद नहीं है, कोई यूटीआर नहीं मिला",
+            "Digits": "#",
+        })
+        res_turn3 = run_coro(step3_details(req_turn3))
+        assert res_turn3.status_code == 200
+        xml_turn3 = res_turn3.body.decode("utf-8")
+
+        # Must NOT exit! Must ask Q5 Suspect Contact!
+        assert sessions[sid]["step3_completed"] is False
+        assert sessions[sid]["last_targeted_field"] == "suspect_contact"
+        assert "फोन नंबर" in xml_turn3 or "यूपीआई" in xml_turn3
+        assert 'action="/step3-details"' in xml_turn3
+
+        # ── 6. Turn 4: Caller answers Suspect Details ──
+        req_turn4 = FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "धोखाधड़ी करने वाले का फोन नंबर 9876543210 था",
+            "Digits": "#",
+        })
+        res_turn4 = run_coro(step3_details(req_turn4))
+        assert res_turn4.status_code == 200
+        xml_turn4 = res_turn4.body.decode("utf-8")
+
+        # All 5 questions answered! Now must transition to confirmation!
+        assert sessions[sid]["step3_completed"] is True
+        assert 'action="/confirm-interview"' in xml_turn4
+        assert "रिपोर्ट तैयार करने" in xml_turn4
+
+        # ── 7. Confirmation Step ──
+        req_confirm = FakeFormRequest({"CallSid": sid, "Digits": "1"})
+        res_confirm = run_coro(confirm_interview(req_confirm))
+        assert res_confirm.status_code == 200
+        assert sessions[sid]["status"] == "COMPLETED"
+        assert sessions[sid].get("pdf_path") is not None
+        assert len(sessions[sid].get("qa_pairs", [])) == 4
+
+
+# ══════════════════════════════════════════════
+#  TEST 12: OTP FRAUD WITHOUT LOSS IN STORY ASKS ALL 5 FROM Q1 TO Q5
+# ══════════════════════════════════════════════
+def test_otp_fraud_when_loss_not_in_story_asks_all_five_questions():
+    """If story does NOT mention amount, engine asks Q1(Loss)->Q2(Date)->Q3(Bank)->Q4(UTR)->Q5(Suspect)."""
+    sid = "CA_OTP_STORY_NOLOSS_100"
+    sessions[sid] = {
+        "call_sid": sid,
+        "caller_phone": "+919988776655",
+        "language": "hi",
+        "incident_state": IncidentState().model_dump(),
+        "status": "IN_PROGRESS",
+    }
+
+    with patch("llm_analyzer.GEMINI_API_KEY", ""), patch("llm_analyzer.OPENAI_API_KEY", ""), patch("asyncio.to_thread", side_effect=lambda func, *args, **kwargs: func(*args, **kwargs)):
+        # Step 1: Name
+        run_coro(step1_name(FakeFormRequest({"CallSid": sid, "SpeechResult": "मेरा नाम अमित है"})))
+
+        # Step 2: Story (No amount mentioned)
+        res_story = run_coro(step2_story(FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "मेरे खाते से ओटीपी पूछकर पैसे निकाल लिए गए हैं",
+        })))
+        assert sessions[sid]["last_targeted_field"] == "financial_loss"
+        assert "नुकसान" in res_story.body.decode("utf-8")
+
+        # Step 3 Turn 1: Loss answer -> Next is Date/Time
+        res_t1 = run_coro(step3_details(FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "कुल 50000 रुपये का नुकसान हुआ है",
+            "Digits": "#",
+        })))
+        assert sessions[sid]["last_targeted_field"] == "incident_date"
+        assert "तारीख" in res_t1.body.decode("utf-8")
+
+        # Step 3 Turn 2: Date answer -> Next is Bank
+        res_t2 = run_coro(step3_details(FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "आज सुबह 10 बजे हुआ था",
+            "Digits": "#",
+        })))
+        assert sessions[sid]["last_targeted_field"] == "bank_name"
+        assert "बैंक का नाम" in res_t2.body.decode("utf-8")
+
+        # Step 3 Turn 3: Bank answer -> Next is UTR
+        res_t3 = run_coro(step3_details(FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "पंजाब नेशनल बैंक (PNB)",
+            "Digits": "#",
+        })))
+        assert sessions[sid]["last_targeted_field"] == "transaction_reference"
+        assert "UTR" in res_t3.body.decode("utf-8")
+
+        # Step 3 Turn 4: UTR answer -> Next is Suspect
+        res_t4 = run_coro(step3_details(FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "UTR नंबर 9988776655 है",
+            "Digits": "#",
+        })))
+        assert sessions[sid]["last_targeted_field"] == "suspect_contact"
+        assert "फोन नंबर" in res_t4.body.decode("utf-8") or "यूपीआई" in res_t4.body.decode("utf-8")
+
+        # Step 3 Turn 5: Suspect answer -> Confirmation
+        res_t5 = run_coro(step3_details(FakeFormRequest({
+            "CallSid": sid,
+            "SpeechResult": "कॉल करने वाले का नंबर 9876500000 था",
+            "Digits": "#",
+        })))
+        assert sessions[sid]["step3_completed"] is True
+        assert 'action="/confirm-interview"' in res_t5.body.decode("utf-8")
+
+        # Step 4: Confirm
+        res_conf = run_coro(confirm_interview(FakeFormRequest({"CallSid": sid, "Digits": "#"})))
+        assert res_conf.status_code == 200
+        assert sessions[sid]["status"] == "COMPLETED"
+        assert len(sessions[sid].get("qa_pairs", [])) == 5

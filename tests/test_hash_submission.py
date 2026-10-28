@@ -232,7 +232,16 @@ def test_incident_story_submission_with_hash():
 # ═══════════════════════════════════════════════
 def test_details_submission_and_confirmation_prompt():
     """Caller provides follow-up details and system presents confirmation menu accepting '1' or '#'."""
+    from llm_analyzer import IncidentState, FieldValue, FieldStatus
     sid = "CA_DETAILS_01"
+    st = IncidentState()
+    st.primary_fraud_category = FieldValue(value="OLX_SCAM", status=FieldStatus.COLLECTED)
+    st.platform = FieldValue(value="OLX", status=FieldStatus.COLLECTED)
+    st.item = FieldValue(value="Phone", status=FieldStatus.COLLECTED)
+    st.payment_method = FieldValue(value="QR Code", status=FieldStatus.COLLECTED)
+    st.financial_loss = FieldValue(value="₹5000", status=FieldStatus.COLLECTED)
+    st.transaction_reference = FieldValue(value="TXN123", status=FieldStatus.COLLECTED)
+
     sessions[sid] = {
         "call_sid": sid,
         "language": "en",
@@ -241,6 +250,8 @@ def test_details_submission_and_confirmation_prompt():
         "scenario": "OLX_SCAM",
         "scenario_label": "OLX / QR Code Scam",
         "follow_up_question": "What was the suspect UPI ID or phone number?",
+        "last_targeted_field": "suspect_contact",
+        "incident_state": st.model_dump(),
         "step2_completed": True,
     }
 

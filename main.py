@@ -45,6 +45,7 @@ from llm_analyzer import (
     select_next_follow_up_question,
     merge_extracted_facts,
     extract_facts_from_text,
+    CATEGORY_FIELD_PRIORITIES,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -362,9 +363,19 @@ def generate_pdf_report(data: dict) -> str:
 
     # Follow-up Q&A
     qa_title = "FOLLOW-UP INVESTIGATION DETAILS / अतिरिक्त विवरण"
-    fq = data.get("follow_up_question", "")
-    fa = data.get("details", "")
-    qa_content = f"Question Asked: {fq}\nResponse Given: {fa}" if (fq or fa) else "No follow-up responses recorded."
+    qa_pairs = data.get("qa_pairs", [])
+    if qa_pairs:
+        qa_lines = []
+        for i, pair in enumerate(qa_pairs, 1):
+            q_text = pair.get("question", "")
+            a_text = pair.get("answer", "")
+            if q_text or a_text:
+                qa_lines.append(f"Q{i}: {q_text}\nA: {a_text}")
+        qa_content = "\n\n".join(qa_lines) if qa_lines else "No follow-up responses recorded."
+    else:
+        fq = data.get("follow_up_question", "")
+        fa = data.get("details", "")
+        qa_content = f"Question Asked: {fq}\nResponse Given: {fa}" if (fq or fa) else "No follow-up responses recorded."
     render_section(qa_title, qa_content, use_hindi=True)
 
     # Evidentiary Particulars (Bank Details & Suspect Details)
@@ -925,12 +936,14 @@ async def step3_details(request: Request):
         details = await transcribe_audio_async(audio_url, call_sid, language=lang)
 
     clean_details = details.replace("#", "").strip()
+    target_field = session.get("last_targeted_field")
+    follow_up_q = session.get("follow_up_question", "")
+
     if not clean_details:
         retries = session.get("details_retries", 0) + 1
         session["details_retries"] = retries
         if retries <= 1:
             logger.warning(f"[RETRY] Step 3 empty details retry {retries}/1 for {call_sid}")
-            follow_up_q = session.get("follow_up_question", "")
             if lang == "hi":
                 prompt = f"{follow_up_q} कृपया अपना उत्तर दें और समाप्त होने पर हैश (#) दबाएं।" if follow_up_q else "कृपया अतिरिक्त विवरण दें और समाप्त होने पर हैश (#) दबाएं।"
                 body = (
@@ -946,21 +959,32 @@ async def step3_details(request: Request):
             return twiml_response(body)
         else:
             logger.warning(f"[FALLBACK] Step 3 details retries exceeded for {call_sid}, using default")
-            clean_details = "कोई अतिरिक्त विवरण नहीं" if lang == "hi" else "No additional details"
+            clean_details = "याद नहीं / पता नहीं" if lang == "hi" else "Don't know / Not available"
 
-    session["details"] = clean_details
-    session["step3_completed"] = True
+    # Reset retry counter for next field
+    session["details_retries"] = 0
+
+    # Record Q&A pair in history
+    session.setdefault("qa_pairs", []).append({
+        "question": follow_up_q,
+        "target_field": target_field,
+        "answer": clean_details,
+    })
+
+    if session.get("details"):
+        session["details"] = f"{session['details']} | {clean_details}"
+    else:
+        session["details"] = clean_details
 
     # Retrieve accumulated state and targeted field
     raw_st = session.get("incident_state")
     curr_st = IncidentState(**raw_st) if raw_st else IncidentState()
-    target_field = session.get("last_targeted_field")
 
     # Update LLM analysis with the follow-up details and context-aware state tracking
     final_analysis: CybercrimeIncidentAnalysis = await asyncio.to_thread(
         analyze_incident_with_llm,
         story=session.get("story", ""),
-        details=session["details"],
+        details=clean_details,
         language=lang,
         caller_name=caller_name,
         existing_state=curr_st,
@@ -970,6 +994,7 @@ async def step3_details(request: Request):
     session["formal_complaint_draft"] = final_analysis.formal_complaint_draft
     if final_analysis.incident_state:
         session["incident_state"] = final_analysis.incident_state.model_dump()
+        curr_st = final_analysis.incident_state
     if final_analysis.incident_date:
         session["incident_date"] = final_analysis.incident_date
     if final_analysis.incident_time:
@@ -983,6 +1008,36 @@ async def step3_details(request: Request):
     if final_analysis.financial_loss:
         session["financial_loss"] = final_analysis.financial_loss
 
+    # Determine next follow-up question
+    category = session.get("scenario") or (curr_st.primary_fraud_category.value if curr_st.primary_fraud_category else "GENERAL_FRAUD")
+    priorities = CATEGORY_FIELD_PRIORITIES.get(category, CATEGORY_FIELD_PRIORITIES.get("GENERAL_FRAUD", []))
+    max_turns = len(priorities)
+    turns = session.get("followup_turns", 0) + 1
+    session["followup_turns"] = turns
+
+    next_field, next_question = select_next_follow_up_question(curr_st, language=lang)
+
+    # If more priority fields remain and within turn limits, ask the next question!
+    if next_field != "all_collected" and turns < max_turns:
+        session["step3_completed"] = False
+        session["last_targeted_field"] = next_field
+        session["follow_up_question"] = next_question
+
+        logger.info(f"[QUESTION] ({lang}) {call_sid} Turn {turns}/{max_turns} -> Next field '{next_field}': {next_question}")
+        if lang == "hi":
+            body = (
+                say(f"{next_question} अपना उत्तर देने के बाद हैश (#) दबाएं।", language="hi")
+                + speech_gather_or_record("/step3-details", language="hi", max_speech_time=45, max_record_len=45)
+            )
+        else:
+            body = (
+                say(f"{next_question} Press hash (#) when you have finished answering.", language="en")
+                + speech_gather_or_record("/step3-details", language="en", max_speech_time=45, max_record_len=45)
+            )
+        return twiml_response(body)
+
+    # All priority questions collected or max turns reached -> Transition to final report confirmation
+    session["step3_completed"] = True
     name = session.get("name", "Citizen")
     label = session.get("scenario_label", "Cyber Fraud")
 

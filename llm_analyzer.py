@@ -443,7 +443,11 @@ def extract_facts_from_text(
         account_number = re.sub(r"[\s-]+", "", acc_match.group(1).strip())
 
     # 6. Extract Transaction Ref / UTR
-    utr_match = re.search(r"\b(utr|ref|transaction\s*id|txn)[\s:#-]*([A-Za-z0-9]{8,22})\b", combined, re.IGNORECASE)
+    utr_match = re.search(
+        r"\b(utr|ref|reference|transaction\s*id|txn|ट्रांजेक्शन\s*(?:आईडी|id)?|रेफरेंस)\s*(?:no\.?|number|संख्या|नं\.?|नंबर)?[\s:#-]*([A-Za-z0-9]{6,25})\b",
+        combined,
+        re.IGNORECASE,
+    )
     txn_ref = utr_match.group(2) if utr_match else None
 
     # 7. Extract Suspect Details
@@ -451,7 +455,7 @@ def extract_facts_from_text(
         re.sub(r"[\s-]+", "", m.group(0))
         for m in re.finditer(r"\b(?:\+91[\s-]?)?[6-9](?:[\s-]?\d){8,9}\b", combined)
     ]
-    suspect_phones = [p for p in suspect_phones if p not in ["1930"]]
+    suspect_phones = [p for p in suspect_phones if p not in ["1930"] and p != txn_ref]
 
     raw_at_matches = re.findall(r"\b[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z0-9.\-_]{2,64}\b", combined)
     suspect_upis = []

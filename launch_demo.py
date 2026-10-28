@@ -152,7 +152,7 @@ def main():
     print("\n" + "═" * 65)
     print("  ★  RAKSHAK AI DEMO ENVIRONMENT IS FULLY ONLINE & READY  ★")
     print("═" * 65)
-    print(f"  • Local Dashboard  : http://localhost:8000/reports")
+    print(f"  • Local Dashboard  : http://localhost:8000")
     print(f"  • Public Tunnel    : {tunnel_url}")
     print(f"  • Twilio Webhook   : {tunnel_url}/incoming-call")
     print(f"  • Server Health    : http://localhost:8000/health (200 OK)")

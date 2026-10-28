@@ -2486,6 +2486,7 @@ if FRONTEND_ASSETS.exists():
 
 
 @app.get("/", include_in_schema=False)
+@app.head("/", include_in_schema=False)
 async def serve_frontend_root():
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():
@@ -2494,6 +2495,7 @@ async def serve_frontend_root():
 
 
 @app.get("/dashboard", include_in_schema=False)
+@app.head("/dashboard", include_in_schema=False)
 async def serve_dashboard():
     index_file = FRONTEND_DIST / "index.html"
     if index_file.exists():

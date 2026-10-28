@@ -1066,10 +1066,10 @@ async def step3_details(request: Request):
         )
 
     body = (
-        '<Gather action="/confirm-interview" method="POST" numDigits="1" timeout="8">'
+        '<Gather action="/confirm-interview" method="POST" input="dtmf speech" numDigits="1" timeout="10">'
         + say(summary_prompt, language=lang)
         + '</Gather>'
-        + f'<Redirect method="POST">/auto-save?CallSid={call_sid}</Redirect>'
+        + f'<Redirect method="POST">/confirm-interview?CallSid={call_sid}&amp;Digits=1</Redirect>'
     )
     return twiml_response(body)
 
@@ -1362,6 +1362,38 @@ async def auto_save(request: Request, CallSid: str = ""):
         except Exception as e:
             logger.error(f"[AUTO-SAVE] Error for {call_sid}: {e}")
             session["status"] = "FAILED"
+
+    # If report was successfully created, offer the delivery menu (SMS / WhatsApp) instead of abruptly hanging up!
+    if session.get("pdf_path") and not is_delivery_already_dispatched(call_sid, "sms") and not is_delivery_already_dispatched(call_sid, "whatsapp"):
+        if lang == "hi":
+            delivery_menu = (
+                "आपकी रक्षक साइबर शिकायत रिपोर्ट तैयार कर ली गई है। "
+                "रिपोर्ट लिंक प्राप्त करने के लिए: एसएमएस पर लिंक के लिए 1 दबाएं, "
+                "व्हाट्सएप पर लिंक के लिए 2 दबाएं, या लिंक नहीं चाहिए तो 3 दबाएं।"
+            )
+            fallback_closing = (
+                say("अपने बैंक को तत्काल सूचित करके अपना खाता और कार्ड सुरक्षित करवाएं।", language="hi")
+                + say("रक्षक एआई से जुड़ने के लिए धन्यवाद। सतर्क रहें, सुरक्षित रहें।", language="hi")
+                + "<Hangup/>"
+            )
+        else:
+            delivery_menu = (
+                "Your Rakshak Cyber Incident Report has been successfully generated. "
+                "To receive your report link: Press 1 for SMS, Press 2 for WhatsApp, or Press 3 for no link."
+            )
+            fallback_closing = (
+                say("Contact your bank immediately to block any compromised cards or accounts.", language="en")
+                + say("Thank you for using Rakshak AI. Stay vigilant and stay safe.", language="en")
+                + "<Hangup/>"
+            )
+
+        body = (
+            '<Gather action="/select-delivery" method="POST" numDigits="1" timeout="10">'
+            + say(delivery_menu, language=lang)
+            + '</Gather>'
+            + fallback_closing
+        )
+        return twiml_response(body)
 
     closing = (
         "आपकी रिपोर्ट सुरक्षित रूप से सेव कर ली गई है। धन्यवाद। सुरक्षित रहें।"

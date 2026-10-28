@@ -31,10 +31,23 @@ from config import (
     TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
     TWILIO_PHONE_NUMBER,
+    TWILIO_WHATSAPP_FROM,
     DEMO_TO_NUMBER,
     BASE_URL,
+    REPORT_TOKEN_EXPIRY_HOURS,
     mask_phone,
     mask_secret,
+)
+from messaging_service import (
+    create_report_access_token,
+    verify_report_token,
+    build_secure_report_url,
+    send_report_sms,
+    send_report_whatsapp,
+    is_delivery_already_dispatched,
+    record_delivery_dispatch,
+    normalize_phone_number,
+    get_delivery_records,
 )
 from llm_analyzer import (
     analyze_incident_with_llm,
@@ -1062,7 +1075,7 @@ async def step3_details(request: Request):
 
 
 def _send_sms_sync(to_phone: str, body: str):
-    """Synchronous worker to dispatch confirmation SMS via Twilio REST API."""
+    """Synchronous worker to dispatch confirmation SMS via Twilio REST API (legacy wrapper)."""
     if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_PHONE_NUMBER and to_phone):
         return None
     try:
@@ -1081,31 +1094,25 @@ def _send_sms_sync(to_phone: str, body: str):
 
 
 async def send_report_sms_async(to_phone: str, download_url: str, report_id: str, language: str = "hi"):
-    """Non-blocking dispatch of SMS notification with report download link and helpline guidance."""
+    """Non-blocking dispatch of SMS notification with report link and helpline guidance."""
     if not to_phone or to_phone.startswith("client:") or to_phone == TWILIO_PHONE_NUMBER:
         return None
-    if language == "hi":
-        sms_text = (
-            f"रक्षक एआई (Rakshak AI) — आपकी साइबर शिकायत रिपोर्ट ({report_id}) तैयार है।\n"
-            f"रिपोर्ट डाउनलोड लिंक: {download_url}\n"
-            f"तत्काल कदम: 1930 हेल्पलाइन पर कॉल करें व बैंक को खाता/कार्ड फ्रीज करने हेतु सूचित करें।"
-        )
-    else:
-        sms_text = (
-            f"Rakshak AI — Your cyber incident report ({report_id}) has been generated.\n"
-            f"Download Report: {download_url}\n"
-            f"Critical: Call 1930 Cybercrime Helpline immediately and notify your bank."
-        )
-    try:
-        return await asyncio.to_thread(_send_sms_sync, to_phone, sms_text)
-    except Exception as e:
-        logger.warning(f"[SMS] Async dispatch error: {e}")
-        return None
+    res = await asyncio.to_thread(
+        send_report_sms,
+        to_phone=to_phone,
+        secure_url=download_url,
+        report_id=report_id,
+        language=language,
+    )
+    return res.get("sid")
 
 
 @app.post("/confirm-interview")
 async def confirm_interview(request: Request):
-    """Step 6 & 7: Finalize interview, generate PDF/JSON report, give emergency guidance, and hang up."""
+    """
+    Step 6 & 7: Finalize interview, generate PDF/JSON report, create secure access token,
+    and prompt the caller to select their preferred report delivery channel (SMS, WhatsApp, or None).
+    """
     form = await request.form()
     call_sid = form.get("CallSid", "unknown")
     digit = (form.get("Digits") or "1").strip()
@@ -1117,9 +1124,9 @@ async def confirm_interview(request: Request):
         session["step3_completed"] = False
         return await step3_details(request)
 
-    # Idempotency check: if report already generated for this CallSid
+    # Idempotency check: ensure report and secure token are generated
     if session.get("status") == "COMPLETED" and session.get("pdf_path"):
-        logger.info(f"[IDEMPOTENCY] Report already generated for {call_sid}, returning closing prompt")
+        logger.info(f"[IDEMPOTENCY] Report already generated for {call_sid}")
     else:
         try:
             pdf_path = await asyncio.to_thread(generate_pdf_report, session)
@@ -1129,49 +1136,212 @@ async def confirm_interview(request: Request):
             session["status"] = "COMPLETED"
             session["completed_at"] = datetime.now().isoformat()
 
-            # Asynchronously send SMS confirmation with download link
-            base = get_base_url(request)
-            pdf_filename = Path(pdf_path).name
-            download_url = f"{base}/download/{pdf_filename}"
-            caller_phone = session.get("caller_phone") or DEMO_TO_NUMBER
-            if caller_phone and caller_phone != TWILIO_PHONE_NUMBER:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(send_report_sms_async(
-                        to_phone=caller_phone,
-                        download_url=download_url,
-                        report_id=session.get("report_id", ""),
-                        language=lang,
-                    ))
-                except (RuntimeError, Exception):
-                    pass
+            # Generate time-limited cryptographically secure access token
+            report_id = session.get("report_id", "RAK-0000")
+            report_token = create_report_access_token(report_id, pdf_path)
+            session["report_token"] = report_token
+            session["secure_download_url"] = build_secure_report_url(report_token, get_base_url(request))
         except Exception as e:
             logger.error(f"[REPORT] Generation error for {call_sid}: {e}")
             session["status"] = "FAILED"
 
+    # Delivery channel menu prompt
     if lang == "hi":
-        body = (
-            say("आपकी रक्षक साइबर रिपोर्ट तैयार कर ली गई है।", language="hi")
-            + say("कृपया तुरंत 1930 साइबर हेल्पलाइन पर कॉल करें और cybercrime.gov.in पर रिपोर्ट दर्ज करें।", language="hi")
+        delivery_menu = (
+            "आपकी रक्षक साइबर शिकायत रिपोर्ट तैयार कर ली गई है। "
+            "रिपोर्ट लिंक प्राप्त करने के लिए: एसएमएस पर लिंक के लिए 1 दबाएं, "
+            "व्हाट्सएप पर लिंक के लिए 2 दबाएं, या लिंक नहीं चाहिए तो 3 दबाएं।"
+        )
+        fallback_closing = (
+            say("कृपया तुरंत 1930 साइबर हेल्पलाइन पर कॉल करें और cybercrime.gov.in पर रिपोर्ट दर्ज करें।", language="hi")
             + say("अपने बैंक को तत्काल सूचित करके अपना खाता और कार्ड सुरक्षित करवाएं।", language="hi")
             + say("रक्षक एआई से जुड़ने के लिए धन्यवाद। सतर्क रहें, सुरक्षित रहें।", language="hi")
             + "<Hangup/>"
         )
     else:
-        body = (
-            say("Your Rakshak Cyber Incident Report has been successfully generated.", language="en")
-            + say("Please dial 1930 immediately to report to the National Cyber Crime Helpline.", language="en")
+        delivery_menu = (
+            "Your Rakshak Cyber Incident Report has been successfully generated. "
+            "To receive your report link: Press 1 for SMS, Press 2 for WhatsApp, or Press 3 for no link."
+        )
+        fallback_closing = (
+            say("Please dial 1930 immediately to report to the National Cyber Crime Helpline.", language="en")
             + say("Contact your bank immediately to block any compromised cards or accounts.", language="en")
             + say("Thank you for using Rakshak AI. Stay vigilant and stay safe.", language="en")
             + "<Hangup/>"
         )
 
+    body = (
+        '<Gather action="/select-delivery" method="POST" numDigits="1" timeout="8">'
+        + say(delivery_menu, language=lang)
+        + '</Gather>'
+        + fallback_closing
+    )
+    return twiml_response(body)
+
+
+@app.post("/select-delivery")
+async def select_delivery(request: Request):
+    """
+    Handle caller's choice of delivery channel for the secure report link:
+    - Digits=1: Send via SMS (using configured Twilio sender)
+    - Digits=2: Send via WhatsApp (using Twilio WhatsApp sender / Sandbox)
+    - Digits=3: Caller declines link delivery
+    - Timeout/Other: Graceful close without dispatching unsolicited messages
+    """
+    form = await request.form()
+    call_sid = form.get("CallSid", "unknown")
+    digit = (form.get("Digits") or "").strip()
+    from_number = form.get("From") or ""
+
+    session = sessions.get(call_sid, {"call_sid": call_sid, "language": "hi"})
+    lang = session.get("language", "hi")
+    report_id = session.get("report_id", "RAK-0000")
+    pdf_path = session.get("pdf_path")
+
+    # Determine recipient phone number (caller or configured demo destination)
+    recipient_phone = from_number or session.get("caller_phone") or DEMO_TO_NUMBER
+    if (not recipient_phone) or recipient_phone.startswith("client:") or recipient_phone == TWILIO_PHONE_NUMBER:
+        recipient_phone = DEMO_TO_NUMBER
+
+    # Ensure secure token and URL exist
+    secure_url = session.get("secure_download_url")
+    if not secure_url and pdf_path:
+        token = create_report_access_token(report_id, pdf_path)
+        session["report_token"] = token
+        secure_url = build_secure_report_url(token, get_base_url(request))
+        session["secure_download_url"] = secure_url
+
+    status_message = ""
+
+    if digit == "1":
+        # Channel: SMS
+        if is_delivery_already_dispatched(call_sid, "sms"):
+            logger.info(f"[DELIVERY] SMS already dispatched for {call_sid}")
+            status_message = (
+                "एसएमएस पहले ही भेजा जा चुका है।"
+                if lang == "hi"
+                else "The SMS has already been sent."
+            )
+        else:
+            sms_res = await asyncio.to_thread(
+                send_report_sms,
+                to_phone=recipient_phone,
+                secure_url=secure_url or "",
+                report_id=report_id,
+                language=lang,
+            )
+            record_delivery_dispatch(
+                call_sid,
+                "sms",
+                sid=sms_res.get("sid"),
+                status=sms_res.get("status", "sent" if sms_res.get("success") else "failed"),
+            )
+            if sms_res.get("success"):
+                status_message = (
+                    "एसएमएस के माध्यम से आपकी रिपोर्ट का सुरक्षित लिंक भेज दिया गया है।"
+                    if lang == "hi"
+                    else "Your secure report link has been sent via SMS."
+                )
+            else:
+                err_code = sms_res.get("error_code")
+                if err_code == 21608:
+                    status_message = (
+                        "ट्रायल खाते के कारण एसएमएस केवल सत्यापित नंबर पर भेजा जा सकता है। आपकी रिपोर्ट सुरक्षित सेव है।"
+                        if lang == "hi"
+                        else "On a trial account, SMS can only be sent to verified numbers. Your report is securely saved."
+                    )
+                else:
+                    status_message = (
+                        "एसएमएस भेजने में समस्या आई है, लेकिन आपकी रिपोर्ट सुरक्षित सेव है।"
+                        if lang == "hi"
+                        else "We could not deliver the SMS, but your report is securely saved."
+                    )
+
+    elif digit == "2":
+        # Channel: WhatsApp
+        if is_delivery_already_dispatched(call_sid, "whatsapp"):
+            logger.info(f"[DELIVERY] WhatsApp already dispatched for {call_sid}")
+            status_message = (
+                "व्हाट्सएप संदेश पहले ही भेजा जा चुका है।"
+                if lang == "hi"
+                else "The WhatsApp message has already been sent."
+            )
+        else:
+            wa_res = await asyncio.to_thread(
+                send_report_whatsapp,
+                to_phone=recipient_phone,
+                secure_url=secure_url or "",
+                report_id=report_id,
+                language=lang,
+            )
+            record_delivery_dispatch(
+                call_sid,
+                "whatsapp",
+                sid=wa_res.get("sid"),
+                status=wa_res.get("status", "sent" if wa_res.get("success") else "failed"),
+            )
+            if wa_res.get("success"):
+                status_message = (
+                    "व्हाट्सएप पर आपकी रिपोर्ट का सुरक्षित लिंक भेज दिया गया है।"
+                    if lang == "hi"
+                    else "Your secure report link has been sent via WhatsApp."
+                )
+            else:
+                err_code = wa_res.get("error_code")
+                if err_code == 63007:
+                    status_message = (
+                        "व्हाट्सएप सैंडबॉक्स से जुड़ना आवश्यक है। कृपया सैंडबॉक्स निर्देश देखें। आपकी रिपोर्ट सुरक्षित सेव है।"
+                        if lang == "hi"
+                        else "WhatsApp Sandbox opt-in is required before delivery. Your report is securely saved."
+                    )
+                else:
+                    status_message = (
+                        "व्हाट्सएप संदेश भेजने में समस्या आई है, लेकिन आपकी रिपोर्ट सुरक्षित सेव है।"
+                        if lang == "hi"
+                        else "We could not deliver via WhatsApp, but your report is securely saved."
+                    )
+
+    elif digit == "3":
+        # Caller explicitly declines delivery
+        status_message = (
+            "ठीक है, आपके फोन पर कोई लिंक नहीं भेजा जाएगा।"
+            if lang == "hi"
+            else "Understood, no report link will be sent to your phone."
+        )
+
+    else:
+        # Unexpected input or timeout
+        status_message = (
+            "आपकी रिपोर्ट सुरक्षित रूप से सेव कर ली गई है।"
+            if lang == "hi"
+            else "Your incident report has been securely saved."
+        )
+
+    # Emergency guidance + Closing
+    if lang == "hi":
+        closing_advice = (
+            "कृपया तुरंत 1930 राष्ट्रीय साइबर हेल्पलाइन पर कॉल करें और cybercrime.gov.in पर रिपोर्ट दर्ज करें। "
+            "अपने बैंक को तत्काल सूचित करके अपना खाता और कार्ड सुरक्षित करवाएं। "
+            "रक्षक एआई से जुड़ने के लिए धन्यवाद। सतर्क रहें, सुरक्षित रहें।"
+        )
+    else:
+        closing_advice = (
+            "Please dial 1930 immediately to report to the National Cyber Crime Helpline and visit cybercrime.gov.in. "
+            "Contact your bank immediately to block any compromised cards or accounts. "
+            "Thank you for using Rakshak AI. Stay vigilant and stay safe."
+        )
+
+    body = (
+        say(status_message, language=lang)
+        + say(closing_advice, language=lang)
+        + "<Hangup/>"
+    )
     return twiml_response(body)
 
 
 @app.post("/auto-save")
 async def auto_save(request: Request, CallSid: str = ""):
-    """Fallback handler: automatically preserves caller data if no DTMF key is pressed."""
+    """Fallback handler: automatically preserves caller data without unsolicited messaging."""
     form = await request.form()
     call_sid = form.get("CallSid") or CallSid
     session = sessions.get(call_sid, {"call_sid": call_sid, "language": "hi"})
@@ -1186,22 +1356,13 @@ async def auto_save(request: Request, CallSid: str = ""):
             session["status"] = "COMPLETED"
             session["completed_at"] = datetime.now().isoformat()
 
-            # Asynchronously send SMS confirmation with download link
-            base = get_base_url(request)
-            pdf_filename = Path(pdf_path).name
-            download_url = f"{base}/download/{pdf_filename}"
-            caller_phone = session.get("caller_phone") or DEMO_TO_NUMBER
-            if caller_phone and caller_phone != TWILIO_PHONE_NUMBER:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(send_report_sms_async(
-                        to_phone=caller_phone,
-                        download_url=download_url,
-                        report_id=session.get("report_id", ""),
-                        language=lang,
-                    ))
-                except (RuntimeError, Exception):
-                    pass
+            # Ensure secure token is created for saved report
+            report_token = create_report_access_token(
+                report_id=session.get("report_id", "RAK-0000"),
+                pdf_path=pdf_path,
+            )
+            session["report_token"] = report_token
+            session["secure_download_url"] = build_secure_report_url(report_token, get_base_url(request))
         except Exception as e:
             logger.error(f"[AUTO-SAVE] Error for {call_sid}: {e}")
             session["status"] = "FAILED"
@@ -1451,7 +1612,7 @@ async def list_reports(request: Request):
 
 @app.get("/reports/latest")
 async def get_latest_report(request: Request):
-    """Retrieve the most recently generated report."""
+    """Retrieve the most recently generated report with both secure token and legacy download links."""
     if not REPORTS_DIR.exists():
         raise HTTPException(status_code=404, detail="No reports available")
 
@@ -1461,12 +1622,58 @@ async def get_latest_report(request: Request):
 
     latest_file = max(pdf_files, key=lambda f: f.stat().st_ctime)
     base = get_base_url(request)
+
+    m = re.search(r"RAK-\d{8}-[A-F0-9]{6}", latest_file.name)
+    rep_id = m.group(0) if m else "RAK-LATEST"
+    token = create_report_access_token(rep_id, latest_file)
+    secure_url = build_secure_report_url(token, base)
+
     return {
         "filename": latest_file.name,
+        "report_id": rep_id,
         "download_url": f"{base}/download/{latest_file.name}",
+        "secure_access_url": secure_url,
         "created_at": datetime.fromtimestamp(latest_file.stat().st_ctime).strftime("%Y-%m-%d %H:%M:%S"),
         "size_kb": round(latest_file.stat().st_size / 1024, 1),
     }
+
+
+@app.get("/report/access/{token}")
+async def access_report_by_token(token: str, request: Request, download: int = 0):
+    """
+    Secure, token-authenticated citizen report access endpoint.
+    - Validates cryptographically random token.
+    - Enforces time expiration (default: 24 hours).
+    - Protects strictly against path traversal attacks.
+    - Serves verified PDF report with secure headers.
+    """
+    is_valid, pdf_path, reason = verify_report_token(token)
+
+    if not is_valid:
+        if reason == "expired":
+            raise HTTPException(
+                status_code=410,
+                detail="This report access link has expired (validity: 24 hours). Please contact the cyber cell or download via dashboard.",
+            )
+        elif reason == "security_violation":
+            raise HTTPException(status_code=403, detail="Access denied: unauthorized token target.")
+        elif reason == "file_missing":
+            raise HTTPException(status_code=404, detail="The requested report file is no longer available.")
+        else:
+            raise HTTPException(status_code=404, detail="Invalid or unrecognized report access link.")
+
+    disposition_type = "attachment" if download else "inline"
+    headers = {
+        "Content-Disposition": f'{disposition_type}; filename="{pdf_path.name}"',
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return FileResponse(
+        str(pdf_path),
+        media_type="application/pdf",
+        filename=pdf_path.name,
+        headers=headers,
+    )
 
 
 @app.get("/download/{filename}")

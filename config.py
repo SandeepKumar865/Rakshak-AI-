@@ -24,12 +24,18 @@ TWILIO_AUTH_TOKEN  = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER") or os.getenv("TWILIO_NUMBER") or ""
 TWILIO_NUMBER       = TWILIO_PHONE_NUMBER  # backward compatibility alias
 
+# Twilio WhatsApp Sender (Trial Sandbox default: whatsapp:+14155238886)
+TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+
 # Destination Mobile Number (Victim / Demo recipient)
 DEMO_TO_NUMBER = os.getenv("DEMO_TO_NUMBER") or os.getenv("YOUR_NUMBER") or ""
 YOUR_NUMBER    = DEMO_TO_NUMBER  # backward compatibility alias
 
 # Public Base URL (Cloudflare Tunnel or ngrok)
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
+
+# Secure Report Access Token Expiry (Hours)
+REPORT_TOKEN_EXPIRY_HOURS = int(os.getenv("REPORT_TOKEN_EXPIRY_HOURS", "24"))
 
 # ── LLM Intelligence Settings (Optional API keys; graceful offline fallback if empty) ──
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""

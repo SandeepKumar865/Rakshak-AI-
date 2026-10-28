@@ -16,13 +16,18 @@ Rakshak AI is an AI-powered interactive voice agent (IVR) designed to act as a f
 [FastAPI Backend (Uvicorn)] ───► [Speech-to-Text (hi-IN / en-IN)]
       │                                       │
       ▼                                       ▼
-[DTMF Language Menu (1: Hindi, 2: English)]  [Keyword Fraud Classifier]
+[DTMF Language Menu (1: Hindi, 2: English)]  [Incident Intelligence Classifier]
       │                                       │
       ▼                                       ▼
 [Voice Narrative & Follow-Up Intake] ───────► [Auto PDF & JSON Generation]
-                                              │
-                                              ▼
-                                       [Reports Dashboard & Download]
+      │                                               │
+      ▼                                               ▼
+[Delivery Selection Menu] ────────────────► [Secure Access Token Engine]
+      │                                               │
+      ├─► [1: SMS Link via Twilio] ───────────────────┤
+      ├─► [2: WhatsApp Link via Sandbox] ─────────────┤
+      └─► [3: Decline Link / Dashboard Only] ─────────▼
+                                   [Secure Citizen Access (/report/access/{token})]
 ```
 
 ---
@@ -95,12 +100,20 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token_here
 TWILIO_PHONE_NUMBER=+1xxxxxxxxxx
 DEMO_TO_NUMBER=+91xxxxxxxxxx
 
+# Twilio WhatsApp Sender (For Trial accounts use Sandbox: whatsapp:+14155238886)
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+
 # Public Base URL (updated in Step 7)
 BASE_URL=https://your-tunnel-subdomain.trycloudflare.com
+
+# Token Security (Report access link validity in hours)
+REPORT_TOKEN_EXPIRY_HOURS=24
 ```
 
-> **Trial Account Note:** If using a Twilio Trial account, verify your mobile number in the Twilio Console before calling:  
-> [Twilio Verified Caller IDs](https://console.twilio.com/us1/develop/phone-numbers/manage/verified)
+> **Trial Account Note:**
+> - **SMS Delivery:** On a Twilio Trial account, SMS can only be sent to numbers verified in your Twilio Console:  
+>   [Twilio Verified Caller IDs](https://console.twilio.com/us1/develop/phone-numbers/manage/verified)
+> - **WhatsApp Delivery:** Twilio numbers are not WhatsApp-enabled by default. Outbound WhatsApp messages use the **Twilio WhatsApp Sandbox** (`whatsapp:+14155238886`). Before receiving WhatsApp reports, the recipient must send `join <your-sandbox-keyword>` to **`+1 415 523 8886`** via WhatsApp.
 
 ---
 
@@ -174,23 +187,35 @@ Dial your configured Twilio number directly from your phone.
    - Press **1** for Hindi, or **2** for English on your dial pad.
 2. **State Your Name:**
    - Speak your full name after the tone (e.g., *"राहुल वर्मा"* or *"Jane Doe"*).
+   - Press `#` when done speaking.
 3. **Describe the Incident:**
    - Explain what happened (e.g., *"मेरे बैंक से कॉल आई और उन्होंने मुझसे आधार कार्ड केवाईसी के नाम पर ओटीपी मांग कर 25000 रुपये निकाल लिए"*).
-4. **Answer Category Follow-up:**
-   - Rakshak AI classifies the scam (OTP Fraud, OLX Scam, Job Scam, Loan Fraud, or General Fraud) and asks a tailored question.
-   - Answer the follow-up question.
-5. **Confirmation & Emergency Advice:**
+   - Press `#` when done.
+4. **Context-Aware Category Follow-up Questions:**
+   - Rakshak AI extracts facts in real-time and asks category-specific questions (OTP Fraud, OLX Scam, Job Scam, Loan Fraud, or General Fraud).
+   - Answer each question one at a time, pressing `#` after each answer.
+5. **Confirmation & Delivery Channel Selection:**
    - Rakshak AI provides a verbal case summary.
-   - Press **1** to confirm and generate the report.
+   - Press **1** or `#` to confirm and generate the report.
+   - Rakshak AI then offers the **Report Delivery Menu**:
+     - Press **1** to receive the secure report link via **SMS**.
+     - Press **2** to receive the secure report link via **WhatsApp**.
+     - Press **3** to decline receiving a link on your phone.
    - Listen to the immediate guidance (National Cyber Helpline 1930 and bank freeze instructions).
 
 ---
 
-### Step 11: View & Download the Generated Report
+### Step 11: View & Access the Generated Report
 
-Open your browser to inspect and download the official report:
+Citizen reports can be accessed either via the secure, time-limited token link or via the administrative dashboard:
 
-- **List All Reports:**
+- **Secure Citizen Access (Token-Protected, 24h Expiry):**
+  ```text
+  http://localhost:8000/report/access/<secure_token>
+  ```
+  *(Enforces cryptographic token verification, anti-path traversal protection, and automatic 24-hour expiration).*
+
+- **List All Reports (Admin Dashboard):**
   ```text
   http://localhost:8000/reports
   ```
@@ -198,7 +223,7 @@ Open your browser to inspect and download the official report:
   ```text
   http://localhost:8000/reports/latest
   ```
-- **Direct PDF Download:**
+- **Direct Administrative PDF Download:**
   ```text
   http://localhost:8000/download/Rakshak_Report_<ReportID>_<Name>.pdf
   ```
@@ -207,15 +232,15 @@ Open your browser to inspect and download the official report:
 
 ## Running Automated Tests
 
-To run the complete automated test suite (mocking Twilio telephony and external speech services):
+To run the complete automated test suite (including DTMF `#` submissions, LLM incident intelligence, multi-turn category follow-up engine, secure report tokens, SMS/WhatsApp Twilio dispatch, and IVR flows):
 
 ```powershell
-py -m pytest tests/test_workflow.py -v
+py -m pytest tests/ -v
 ```
 
-All 26 automated unit and integration tests should pass:
+All 77 automated unit and integration tests should pass:
 ```text
-======================= 26 passed in 1.98s =======================
+======================= 77 passed, 16 warnings in 9.11s =======================
 ```
 
 ---

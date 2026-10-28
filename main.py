@@ -11,6 +11,7 @@ import os
 import re
 import uuid
 import json
+import urllib.parse
 import asyncio
 from datetime import datetime
 import logging
@@ -1690,16 +1691,23 @@ async def access_report_by_token(token: str, request: Request, download: int = 0
         else:
             raise HTTPException(status_code=404, detail="Invalid or unrecognized report access link.")
 
+    # Safe ASCII fallback filename + RFC 5987 UTF-8 encoded filename to prevent latin-1 header encoding errors
+    m = re.search(r"RAK-\d{8}-[A-F0-9]{6}", pdf_path.name)
+    rep_id = m.group(0) if m else "Incident_Report"
+    ascii_safe_name = f"Rakshak_{rep_id}.pdf"
+    encoded_utf8_name = urllib.parse.quote(pdf_path.name)
+
     disposition_type = "attachment" if download else "inline"
+    content_disposition = f"{disposition_type}; filename=\"{ascii_safe_name}\"; filename*=UTF-8''{encoded_utf8_name}"
+
     headers = {
-        "Content-Disposition": f'{disposition_type}; filename="{pdf_path.name}"',
+        "Content-Disposition": content_disposition,
         "Cache-Control": "private, no-cache, no-store, must-revalidate",
         "X-Content-Type-Options": "nosniff",
     }
     return FileResponse(
         str(pdf_path),
         media_type="application/pdf",
-        filename=pdf_path.name,
         headers=headers,
     )
 
@@ -1724,8 +1732,18 @@ async def download_report(filename: str):
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Requested report not found")
 
+    m = re.search(r"RAK-\d{8}-[A-F0-9]{6}", safe_name)
+    rep_id = m.group(0) if m else "Incident_Report"
+    ext = ".pdf" if safe_name.endswith(".pdf") else ".json"
+    ascii_safe_name = f"Rakshak_{rep_id}{ext}"
+    encoded_utf8_name = urllib.parse.quote(safe_name)
+
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{ascii_safe_name}\"; filename*=UTF-8''{encoded_utf8_name}",
+        "X-Content-Type-Options": "nosniff",
+    }
     media_type = "application/pdf" if safe_name.endswith(".pdf") else "application/json"
-    return FileResponse(str(file_path), media_type=media_type, filename=safe_name)
+    return FileResponse(str(file_path), media_type=media_type, headers=headers)
 
 
 @app.get("/health")

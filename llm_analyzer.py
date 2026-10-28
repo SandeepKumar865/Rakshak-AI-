@@ -250,6 +250,108 @@ SINGLE_QUESTIONS = {
     },
 }
 
+# ══════════════════════════════════════════════
+#  CATEGORY-SPECIFIC QUESTION OVERRIDES
+# ══════════════════════════════════════════════
+CATEGORY_QUESTIONS = {
+    "OTP_FRAUD": {
+        "financial_loss": {
+            "hi": "कृपया बताएं कि इस धोखाधड़ी में आपका कुल कितने रुपये का नुकसान हुआ है?",
+            "en": "Please state the total amount of money lost or debited from your account.",
+            "clarify_hi": "क्या आप बता सकते हैं कि लगभग कितने रुपये का नुकसान हुआ है?",
+            "clarify_en": "Could you please clarify approximately how much money was debited or lost?",
+        },
+        "incident_date": {
+            "hi": "यह घटना किस तारीख और लगभग किस समय पर हुई थी?",
+            "en": "On what date and approximately what time did this incident occur?",
+        },
+        "bank_name": {
+            "hi": "धोखाधड़ी किस बैंक के खाते से हुई है, कृपया अपने बैंक का नाम बताएं?",
+            "en": "Which bank was your affected account with? Please state your bank's name.",
+        },
+        "transaction_reference": {
+            "hi": "क्या आपके पास बैंक संदेश या ऐप में आया हुआ कोई UTR नंबर या ट्रांजेक्शन आईडी है?",
+            "en": "Do you have the bank UTR number, transaction reference ID, or payment proof?",
+        },
+        "suspect_contact": {
+            "hi": "क्या आपके पास धोखाधड़ी करने वाले का फोन नंबर, नाम या यूपीआई आईडी है?",
+            "en": "Do you have any contact details of the suspect, such as their phone number, UPI ID, or name?",
+        },
+    },
+    "OLX_SCAM": {
+        "platform": {
+            "hi": "यह धोखाधड़ी किस ऑनलाइन प्लेटफॉर्म पर हुई, जैसे ओएलएक्स, फेसबुक मार्केटप्लेस, या क्विकर?",
+            "en": "Which platform did this occur on, such as OLX, Facebook Marketplace, or Quikr?",
+        },
+        "item": {
+            "hi": "आप किस सामान या वस्तु को खरीदने या बेचने का प्रयास कर रहे थे?",
+            "en": "What specific item or product were you attempting to buy or sell?",
+        },
+        "payment_method": {
+            "hi": "पैसे किस माध्यम से भेजे या कटे थे, जैसे क्यूआर कोड स्कैन करके या यूपीआई ऐप से?",
+            "en": "How was the payment made, for example by scanning a QR code or via a UPI app?",
+        },
+        "financial_loss": {
+            "hi": "कृपया बताएं कि इस धोखाधड़ी में आपका कुल कितने रुपये का नुकसान हुआ है?",
+            "en": "Please state the total amount of money lost or debited from your account.",
+            "clarify_hi": "क्या आप बता सकते हैं कि लगभग कितने रुपये का नुकसान हुआ है?",
+            "clarify_en": "Could you please clarify approximately how much money was debited or lost?",
+        },
+        "transaction_reference": {
+            "hi": "क्या आपके पास बैंक संदेश या ऐप में आया हुआ कोई UTR नंबर या ट्रांजेक्शन आईडी है?",
+            "en": "Do you have the bank UTR number, transaction reference ID, or payment proof?",
+        },
+        "suspect_contact": {
+            "hi": "क्या आपके पास धोखाधड़ी करने वाले का फोन नंबर, नाम या यूपीआई आईडी है?",
+            "en": "Do you have any contact details of the suspect, such as their phone number, UPI ID, or name?",
+        },
+    },
+    "JOB_SCAM": {
+        "platform": {
+            "hi": "नौकरी या टास्क का ऑफर आपको किस प्लेटफॉर्म पर मिला था, जैसे टेलीग्राम या व्हाट्सएप?",
+            "en": "On which platform was this job or task offered, such as Telegram or WhatsApp?",
+        },
+        "suspect_contact": {
+            "hi": "क्या आपके पास उस रिक्रूटर या एडमिन का फोन नंबर, नाम, या टेलीग्राम हैंडल है?",
+            "en": "Do you have any contact details of the recruiter, such as their phone number, Telegram handle, or name?",
+        },
+        "financial_loss": {
+            "hi": "आपने प्रीपेड टास्क या रजिस्ट्रेशन के नाम पर कुल कितने रुपये का भुगतान किया था?",
+            "en": "What was the total amount you deposited or paid for the tasks or registration?",
+            "clarify_hi": "क्या आप बता सकते हैं कि लगभग कितने रुपये का भुगतान किया गया था?",
+            "clarify_en": "Could you please clarify approximately how much money was deposited or paid?",
+        },
+        "promised_work": {
+            "hi": "आपको किस प्रकार के काम या टास्क का वादा किया गया था, जैसे यूट्यूब लाइक, रिव्यू या डेटा एंट्री?",
+            "en": "What type of work or earnings were promised, such as YouTube likes, reviews, or data entry tasks?",
+        },
+        "transaction_reference": {
+            "hi": "क्या आपके पास किए गए भुगतान का कोई UTR नंबर, ट्रांजेक्शन आईडी या स्क्रीनशॉट का विवरण है?",
+            "en": "Do you have the transaction UTR number or payment proof for the transfers you made?",
+        },
+    },
+    "LOAN_FRAUD": {
+        "app_name": {
+            "hi": "उस फर्जी लोन ऐप का नाम क्या है जिससे आपने लोन लिया या अप्लाई किया था?",
+            "en": "What is the exact name of the loan application you downloaded or applied through?",
+        },
+        "financial_loss": {
+            "hi": "आपसे कुल कितने रुपये की मांग की जा रही है या आपने कितना भुगतान किया है?",
+            "en": "What is the total amount demanded from you or already paid as fees?",
+            "clarify_hi": "क्या आप बता सकते हैं कि लगभग कितने रुपये की मांग की जा रही है या भुगतान हुआ है?",
+            "clarify_en": "Could you please clarify approximately how much money was demanded or paid?",
+        },
+        "threats_received": {
+            "hi": "आपको किस प्रकार की धमकियां या ब्लैकमेलिंग का सामना करना पड़ा है, जैसे कॉन्टैक्ट लिस्ट पर कॉल करना?",
+            "en": "What specific threats or extortion have you experienced, such as contact list misuse or harassment?",
+        },
+        "suspect_contact": {
+            "hi": "क्या आपके पास धमकी देने वाले एजेंटों का फोन नंबर, नाम, या बैंक/यूपीआई विवरण है?",
+            "en": "Do you have the phone numbers, UPI IDs, or details of the recovery agents contacting you?",
+        },
+    },
+}
+
 UNKNOWN_PATTERNS = [
     r"\b(don'?t\s+know|dont\s+know|do\s+not\s+know|not\s+remember(?:ed)?|can'?t\s+remember|cannot\s+remember|no\s+idea|not\s+sure|none|no\s+info|not\s+available|pata\s+nahi|yaad\s+nahi|nahi\s+pata|naahi\s+pata)\b",
     r"(?:याद\s*नहीं|पता\s*नहीं|मालूम\s*नहीं|नहीं\s*पता|ध्यान\s*नहीं|नहीं\s*है|नहीं\s*मालूम|कुछ\s*नहीं\s*पता|कोई\s*जानकारी\s*नहीं|नाही\s*पता|नही\s*पता|नहीं\s*मालुम)",
@@ -302,12 +404,18 @@ def select_next_follow_up_question(
         category = state.primary_fraud_category.value
 
     priorities = CATEGORY_FIELD_PRIORITIES.get(category, CATEGORY_FIELD_PRIORITIES["GENERAL_FRAUD"])
+    cat_questions = CATEGORY_QUESTIONS.get(category, {})
+
+    def get_q_dict(f_name: str) -> dict:
+        if f_name in cat_questions:
+            return cat_questions[f_name]
+        return SINGLE_QUESTIONS.get(f_name, {})
 
     # 1. First check for fields needing clarification
     for field_name in priorities:
         field_val: FieldValue = getattr(state, field_name, None)
         if field_val and field_val.status == FieldStatus.NEEDS_CLARIFICATION:
-            q_dict = SINGLE_QUESTIONS.get(field_name, {})
+            q_dict = get_q_dict(field_name)
             q_text = q_dict.get(f"clarify_{language}") or q_dict.get("clarify_en") or q_dict.get(language, "")
             return field_name, q_text
 
@@ -315,7 +423,7 @@ def select_next_follow_up_question(
     for field_name in priorities:
         field_val: FieldValue = getattr(state, field_name, None)
         if field_val and field_val.status == FieldStatus.MISSING:
-            q_dict = SINGLE_QUESTIONS.get(field_name, {})
+            q_dict = get_q_dict(field_name)
             q_text = q_dict.get(language) or q_dict.get("en", "")
             return field_name, q_text
 

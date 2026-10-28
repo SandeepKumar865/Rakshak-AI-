@@ -441,7 +441,7 @@ def test_four_categories_step_by_step_turn_progression():
     # Q3: Amount paid
     t3, q3 = select_next_follow_up_question(job_state, "hi")
     assert t3 == "financial_loss"
-    assert "नुकसान" in q3
+    assert "भुगतान" in q3 or "रुपये" in q3
     job_state.financial_loss = FieldValue(value="₹50000", status=FieldStatus.COLLECTED)
 
     # Q4: Promised work
@@ -453,7 +453,7 @@ def test_four_categories_step_by_step_turn_progression():
     # Q5: Payment proof / transaction reference
     t5, q5 = select_next_follow_up_question(job_state, "hi")
     assert t5 == "transaction_reference"
-    assert "UTR" in q5
+    assert "UTR" in q5 or "भुगतान" in q5
 
     # ── Category 4: Loan App Fraud ──
     loan_state = IncidentState()
@@ -468,7 +468,7 @@ def test_four_categories_step_by_step_turn_progression():
     # Q2: Amount paid or demanded
     t2, q2 = select_next_follow_up_question(loan_state, "hi")
     assert t2 == "financial_loss"
-    assert "नुकसान" in q2
+    assert "मांग" in q2 or "भुगतान" in q2
     loan_state.financial_loss = FieldValue(value="₹8000 demanded", status=FieldStatus.COLLECTED)
 
     # Q3: Threats received
@@ -675,3 +675,63 @@ def test_otp_fraud_when_loss_not_in_story_asks_all_five_questions():
         assert res_conf.status_code == 200
         assert sessions[sid]["status"] == "COMPLETED"
         assert len(sessions[sid].get("qa_pairs", [])) == 5
+
+
+# ══════════════════════════════════════════════
+#  TEST 13: EXACT WORD-FOR-WORD BILINGUAL QUESTION VERIFICATION
+# ══════════════════════════════════════════════
+def test_exact_category_questions_word_for_word():
+    """Verifies that all 4 categories formulate the exact questions specified by user in Hindi and English."""
+    from llm_analyzer import CATEGORY_QUESTIONS
+
+    # 1. OTP / Banking Fraud
+    otp_q = CATEGORY_QUESTIONS["OTP_FRAUD"]
+    assert otp_q["financial_loss"]["hi"] == "कृपया बताएं कि इस धोखाधड़ी में आपका कुल कितने रुपये का नुकसान हुआ है?"
+    assert otp_q["financial_loss"]["en"] == "Please state the total amount of money lost or debited from your account."
+    assert otp_q["incident_date"]["hi"] == "यह घटना किस तारीख और लगभग किस समय पर हुई थी?"
+    assert otp_q["incident_date"]["en"] == "On what date and approximately what time did this incident occur?"
+    assert otp_q["bank_name"]["hi"] == "धोखाधड़ी किस बैंक के खाते से हुई है, कृपया अपने बैंक का नाम बताएं?"
+    assert otp_q["bank_name"]["en"] == "Which bank was your affected account with? Please state your bank's name."
+    assert otp_q["transaction_reference"]["hi"] == "क्या आपके पास बैंक संदेश या ऐप में आया हुआ कोई UTR नंबर या ट्रांजेक्शन आईडी है?"
+    assert otp_q["transaction_reference"]["en"] == "Do you have the bank UTR number, transaction reference ID, or payment proof?"
+    assert otp_q["suspect_contact"]["hi"] == "क्या आपके पास धोखाधड़ी करने वाले का फोन नंबर, नाम या यूपीआई आईडी है?"
+    assert otp_q["suspect_contact"]["en"] == "Do you have any contact details of the suspect, such as their phone number, UPI ID, or name?"
+
+    # 2. OLX / Marketplace Scam
+    olx_q = CATEGORY_QUESTIONS["OLX_SCAM"]
+    assert olx_q["platform"]["hi"] == "यह धोखाधड़ी किस ऑनलाइन प्लेटफॉर्म पर हुई, जैसे ओएलएक्स, फेसबुक मार्केटप्लेस, या क्विकर?"
+    assert olx_q["platform"]["en"] == "Which platform did this occur on, such as OLX, Facebook Marketplace, or Quikr?"
+    assert olx_q["item"]["hi"] == "आप किस सामान या वस्तु को खरीदने या बेचने का प्रयास कर रहे थे?"
+    assert olx_q["item"]["en"] == "What specific item or product were you attempting to buy or sell?"
+    assert olx_q["payment_method"]["hi"] == "पैसे किस माध्यम से भेजे या कटे थे, जैसे क्यूआर कोड स्कैन करके या यूपीआई ऐप से?"
+    assert olx_q["payment_method"]["en"] == "How was the payment made, for example by scanning a QR code or via a UPI app?"
+    assert olx_q["financial_loss"]["hi"] == "कृपया बताएं कि इस धोखाधड़ी में आपका कुल कितने रुपये का नुकसान हुआ है?"
+    assert olx_q["financial_loss"]["en"] == "Please state the total amount of money lost or debited from your account."
+    assert olx_q["transaction_reference"]["hi"] == "क्या आपके पास बैंक संदेश या ऐप में आया हुआ कोई UTR नंबर या ट्रांजेक्शन आईडी है?"
+    assert olx_q["transaction_reference"]["en"] == "Do you have the bank UTR number, transaction reference ID, or payment proof?"
+    assert olx_q["suspect_contact"]["hi"] == "क्या आपके पास धोखाधड़ी करने वाले का फोन नंबर, नाम या यूपीआई आईडी है?"
+    assert olx_q["suspect_contact"]["en"] == "Do you have any contact details of the suspect, such as their phone number, UPI ID, or name?"
+
+    # 3. Job / Task Scam
+    job_q = CATEGORY_QUESTIONS["JOB_SCAM"]
+    assert job_q["platform"]["hi"] == "नौकरी या टास्क का ऑफर आपको किस प्लेटफॉर्म पर मिला था, जैसे टेलीग्राम या व्हाट्सएप?"
+    assert job_q["platform"]["en"] == "On which platform was this job or task offered, such as Telegram or WhatsApp?"
+    assert job_q["suspect_contact"]["hi"] == "क्या आपके पास उस रिक्रूटर या एडमिन का फोन नंबर, नाम, या टेलीग्राम हैंडल है?"
+    assert job_q["suspect_contact"]["en"] == "Do you have any contact details of the recruiter, such as their phone number, Telegram handle, or name?"
+    assert job_q["financial_loss"]["hi"] == "आपने प्रीपेड टास्क या रजिस्ट्रेशन के नाम पर कुल कितने रुपये का भुगतान किया था?"
+    assert job_q["financial_loss"]["en"] == "What was the total amount you deposited or paid for the tasks or registration?"
+    assert job_q["promised_work"]["hi"] == "आपको किस प्रकार के काम या टास्क का वादा किया गया था, जैसे यूट्यूब लाइक, रिव्यू या डेटा एंट्री?"
+    assert job_q["promised_work"]["en"] == "What type of work or earnings were promised, such as YouTube likes, reviews, or data entry tasks?"
+    assert job_q["transaction_reference"]["hi"] == "क्या आपके पास किए गए भुगतान का कोई UTR नंबर, ट्रांजेक्शन आईडी या स्क्रीनशॉट का विवरण है?"
+    assert job_q["transaction_reference"]["en"] == "Do you have the transaction UTR number or payment proof for the transfers you made?"
+
+    # 4. Loan App Fraud
+    loan_q = CATEGORY_QUESTIONS["LOAN_FRAUD"]
+    assert loan_q["app_name"]["hi"] == "उस फर्जी लोन ऐप का नाम क्या है जिससे आपने लोन लिया या अप्लाई किया था?"
+    assert loan_q["app_name"]["en"] == "What is the exact name of the loan application you downloaded or applied through?"
+    assert loan_q["financial_loss"]["hi"] == "आपसे कुल कितने रुपये की मांग की जा रही है या आपने कितना भुगतान किया है?"
+    assert loan_q["financial_loss"]["en"] == "What is the total amount demanded from you or already paid as fees?"
+    assert loan_q["threats_received"]["hi"] == "आपको किस प्रकार की धमकियां या ब्लैकमेलिंग का सामना करना पड़ा है, जैसे कॉन्टैक्ट लिस्ट पर कॉल करना?"
+    assert loan_q["threats_received"]["en"] == "What specific threats or extortion have you experienced, such as contact list misuse or harassment?"
+    assert loan_q["suspect_contact"]["hi"] == "क्या आपके पास धमकी देने वाले एजेंटों का फोन नंबर, नाम, या बैंक/यूपीआई विवरण है?"
+    assert loan_q["suspect_contact"]["en"] == "Do you have the phone numbers, UPI IDs, or details of the recovery agents contacting you?"

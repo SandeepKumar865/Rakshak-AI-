@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+temp/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ignore generated test & demo reports
+reports/*.json
+reports/*.pdf
+
+# Preserve committed sample reports
+!reports/Data_CA03fa7883abf27e0e0f7bcfef8f4b2e0a.json
+!reports/Data_CA6d99e7128850a6329b3b618666a207a4.json

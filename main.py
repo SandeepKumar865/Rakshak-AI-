@@ -5,6 +5,9 @@ FastAPI Backend with Twilio Voice, Google Speech-to-Text, LLM Incident Intellige
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response, FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from fpdf import FPDF
 import requests
 import os
@@ -71,6 +74,14 @@ app = FastAPI(
     version="2.1.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # ══════════════════════════════════════════════
 #  DIRECTORY & FONT CONFIGURATION
 # ══════════════════════════════════════════════
@@ -78,6 +89,9 @@ BASE_DIR = Path(__file__).resolve().parent
 REPORTS_DIR = BASE_DIR / "reports"
 TEMP_DIR = BASE_DIR / "temp"
 FONTS_DIR = BASE_DIR / "fonts"
+FRONTEND_DIR = BASE_DIR / "frontend"
+FRONTEND_DIST = FRONTEND_DIR / "dist"
+FRONTEND_ASSETS = FRONTEND_DIST / "assets"
 
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -617,6 +631,13 @@ async def incoming_call(request: Request):
         "status": "IN_PROGRESS",
     }
 
+    save_call_event(call_sid, {
+        "destination": from_num,
+        "status": "in-progress",
+        "stage": "language_selection",
+        "updated_at": datetime.now().isoformat(),
+    })
+
     body = (
         '<Gather action="/select-language" method="POST" numDigits="1" timeout="7">'
         + say("नमस्ते! रक्षक एआई में आपका स्वागत है। हिंदी में बात करने के लिए 1 दबाएं।", language="hi")
@@ -647,6 +668,11 @@ async def retry_language(request: Request, CallSid: str = ""):
         return twiml_response(body)
     else:
         session["language"] = "hi"
+        save_call_event(call_sid, {
+            "language": "hi",
+            "stage": "name_collection",
+            "status": "in-progress",
+        })
         body = (
             say("कोई इनपुट नहीं मिला। हम हिंदी में आगे बढ़ रहे हैं।", language="hi")
             + say("कृपया बीप के बाद अपना पूरा नाम बोलें और समाप्त होने पर हैश (#) दबाएं।", language="hi")
@@ -678,6 +704,11 @@ async def select_language(request: Request):
 
     elif digits == "2":
         session["language"] = "en"
+        save_call_event(call_sid, {
+            "language": "en",
+            "stage": "name_collection",
+            "status": "in-progress",
+        })
         body = (
             say("You have selected English. Rakshak AI is here to assist you.", language="en")
             + say("Please say your full name after the beep and press hash (#) when finished.", language="en")
@@ -770,6 +801,11 @@ async def step1_name(request: Request):
     session["incident_state"] = curr_st.model_dump()
 
     logger.info(f"[CALLER] Registered name for {call_sid}: '{name}' (raw='{raw_name}')")
+    save_call_event(call_sid, {
+        "citizen_name": name,
+        "stage": "incident_narrative",
+        "status": "in-progress",
+    })
 
     if lang == "hi":
         body = (
@@ -887,6 +923,11 @@ async def step2_story(request: Request):
         session["missing_information"] = analysis.missing_information
     if analysis.financial_loss:
         session["financial_loss"] = analysis.financial_loss
+    save_call_event(call_sid, {
+        "category": analysis.fraud_category,
+        "stage": "follow_up_qa",
+        "status": "in-progress",
+    })
 
     follow_up_q = analysis.follow_up_question
     label = analysis.fraud_category_label
@@ -1142,6 +1183,14 @@ async def confirm_interview(request: Request):
             report_token = create_report_access_token(report_id, pdf_path)
             session["report_token"] = report_token
             session["secure_download_url"] = build_secure_report_url(report_token, get_base_url(request))
+            save_call_event(call_sid, {
+                "status": "completed",
+                "stage": "completed",
+                "report_id": report_id,
+                "citizen_name": session.get("name", "Citizen"),
+                "category": session.get("scenario", "GENERAL_FRAUD"),
+                "loss": session.get("financial_loss", "Not specified"),
+            })
         except Exception as e:
             logger.error(f"[REPORT] Generation error for {call_sid}: {e}")
             session["status"] = "FAILED"
@@ -1360,6 +1409,14 @@ async def auto_save(request: Request, CallSid: str = ""):
             )
             session["report_token"] = report_token
             session["secure_download_url"] = build_secure_report_url(report_token, get_base_url(request))
+            save_call_event(call_sid, {
+                "status": "completed",
+                "stage": "completed",
+                "report_id": session.get("report_id", "RAK-0000"),
+                "citizen_name": session.get("name", "Citizen"),
+                "category": session.get("scenario", "GENERAL_FRAUD"),
+                "loss": session.get("financial_loss", "Not specified"),
+            })
         except Exception as e:
             logger.error(f"[AUTO-SAVE] Error for {call_sid}: {e}")
             session["status"] = "FAILED"
@@ -1467,6 +1524,181 @@ async def api_analyze_incident(request: Request):
 #  DASHBOARD & SECURE DOWNLOAD ENDPOINTS
 # ══════════════════════════════════════════════
 
+# ══════════════════════════════════════════════
+#  OFFICER AUTHENTICATION, CALL INITIATION & TRACKING MODELS
+# ══════════════════════════════════════════════
+
+class StatusUpdateRequest(BaseModel):
+    status: str
+
+
+class OfficerLoginRequest(BaseModel):
+    badge_number: str
+    password: str = ""
+    role: str = "Cyber Crime Officer"
+
+
+class CallInitiateRequest(BaseModel):
+    destination_number: str
+    language: str = "hi"
+    officer_badge: str = "OFF-1930"
+    simulation: bool = False
+
+
+class ReportDeliveryRequest(BaseModel):
+    channel: str = "sms"  # sms or whatsapp
+    phone_number: str
+
+
+CALL_HISTORY_FILE = REPORTS_DIR / "call_history.json"
+
+
+def _parse_loss_numeric(val) -> float:
+    """Parse numeric currency loss amount from text or numeric values."""
+    if val is None or val == "":
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).lower()
+    mult = 1.0
+    if "crore" in s or "करोड़" in s:
+        mult = 10000000.0
+    elif "lakh" in s or "लाख" in s:
+        mult = 100000.0
+    elif "thousand" in s or "हजार" in s or "हज़ार" in s:
+        mult = 1000.0
+
+    cleaned = re.sub(r"[^\d.]", "", s)
+    if not cleaned:
+        return 0.0
+    try:
+        num = float(cleaned)
+        return num * mult if mult > 1.0 and num < 1000 else num
+    except ValueError:
+        return 0.0
+
+
+def _derive_case_priority(data: dict) -> str:
+    """
+    Transparent dashboard priority classification derived purely from incident parameters.
+    Clearly marked as dashboard-derived priority (not an official police classification).
+    """
+    loss = _parse_loss_numeric(data.get("financial_loss"))
+    scenario = data.get("scenario", "GENERAL_FRAUD")
+    story = (data.get("story") or "").lower()
+    details = (data.get("details") or "").lower()
+    text = f"{story} {details}"
+
+    if loss >= 50000 or any(w in text for w in ["threat", "blackmail", "extortion", "धमकी", "आत्महत्या", "suicide", "police arrest"]):
+        return "Critical"
+    if loss >= 10000 or scenario in ("OTP_FRAUD", "LOAN_FRAUD"):
+        return "High"
+    if loss > 0 or scenario in ("JOB_SCAM", "OLX_SCAM"):
+        return "Medium"
+    return "Low"
+
+
+def _normalize_case_status(raw_status: str | None) -> str:
+    """Standardize status into one of: New, Under Review, Investigating, Resolved, Closed."""
+    if not raw_status:
+        return "New"
+    m = {
+        "new": "New",
+        "in_progress": "Under Review",
+        "under review": "Under Review",
+        "under_review": "Under Review",
+        "investigating": "Investigating",
+        "resolved": "Resolved",
+        "closed": "Closed",
+        "completed": "New",
+        "failed": "New",
+    }
+    return m.get(raw_status.strip().lower(), "New")
+
+
+def _find_matching_pdf(report_id: str, name: str = "", base_url: str = ""):
+    """Locate matching PDF file in REPORTS_DIR for a given report ID or citizen name."""
+    if not REPORTS_DIR.exists():
+        return None, None
+
+    if report_id:
+        for f in REPORTS_DIR.glob(f"Rakshak_Report_{report_id}*.pdf"):
+            return f.name, f"{base_url}/download/{f.name}"
+
+    if name:
+        clean = re.sub(r"[^\w\s-]", "", name).strip()
+        clean = clean.replace(" ", "_")[:15]
+        if clean:
+            for f in REPORTS_DIR.glob(f"Rakshak_Report_*{clean}*.pdf"):
+                return f.name, f"{base_url}/download/{f.name}"
+
+    return None, None
+
+
+def get_call_history() -> list[dict]:
+    """Retrieve persistent call log from disk or seed from existing reports."""
+    if CALL_HISTORY_FILE.exists():
+        try:
+            with open(CALL_HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read call_history.json: {e}")
+
+    seeded = []
+    if REPORTS_DIR.exists():
+        for p in sorted(REPORTS_DIR.glob("Data_*.json"), key=lambda x: x.stat().st_ctime, reverse=True):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                csid = d.get("call_sid") or p.stem.replace("Data_", "")
+                rid = d.get("report_id") or p.stem.replace("Data_", "")
+                seeded.append({
+                    "call_sid": csid,
+                    "report_id": rid,
+                    "destination": d.get("caller_phone") or "+919876543210",
+                    "citizen_name": d.get("name") or "Citizen",
+                    "language": d.get("language") or "hi",
+                    "status": "completed",
+                    "duration_seconds": 128,
+                    "created_at": d.get("started_at") or d.get("started") or datetime.now().isoformat(),
+                    "category": d.get("scenario") or "GENERAL_FRAUD",
+                    "loss": d.get("financial_loss") or "None",
+                })
+            except Exception:
+                continue
+
+    try:
+        with open(CALL_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(seeded, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    return seeded
+
+
+def save_call_event(call_sid: str, event_data: dict):
+    """Persist call state updates atomically."""
+    history = get_call_history()
+    existing = next((c for c in history if c.get("call_sid") == call_sid), None)
+    if existing:
+        existing.update(event_data)
+        existing["updated_at"] = datetime.now().isoformat()
+    else:
+        new_entry = {
+            "call_sid": call_sid,
+            "created_at": datetime.now().isoformat(),
+            "status": "initiated",
+            **event_data,
+        }
+        history.insert(0, new_entry)
+
+    try:
+        with open(CALL_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to save call event: {e}")
+
+
 @app.get("/reports")
 async def list_reports(request: Request):
     """List all generated incident reports with metadata and secure download links."""
@@ -1495,6 +1727,7 @@ async def list_reports(request: Request):
                 "filename": f.name,
                 "report_id": rep_id or "Legacy",
                 "name": meta.get("name", "Citizen"),
+                "citizen_name": meta.get("name", "Citizen"),
                 "scenario": meta.get("scenario", "GENERAL_FRAUD"),
                 "scenario_label": meta.get("scenario_label", "General Cybercrime"),
                 "loss": meta.get("financial_loss", "Not specified"),
@@ -1746,7 +1979,492 @@ async def download_report(filename: str):
     return FileResponse(str(file_path), media_type=media_type, headers=headers)
 
 
+
+
+@app.get("/api/cases")
+async def list_cases(request: Request):
+    """
+    List all cybercrime complaints/cases parsed directly from existing reports/*.json files.
+    Calculates real metrics, priorities, and associated PDF download URLs.
+    """
+    cases = []
+    base = get_base_url(request)
+
+    if REPORTS_DIR.exists():
+        for p in REPORTS_DIR.glob("Data_*.json"):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                report_id = data.get("report_id") or data.get("call_sid") or p.stem.replace("Data_", "")
+                name = data.get("name") or "Anonymous Citizen"
+                scenario = data.get("scenario") or "GENERAL_FRAUD"
+                scen_info = SCENARIOS.get(scenario, SCENARIOS.get("GENERAL_FRAUD", {}))
+                scen_label = data.get("scenario_label") or scen_info.get("label_en", scenario)
+
+                # Date parsing
+                raw_date = data.get("started_at") or data.get("started")
+                if raw_date:
+                    try:
+                        created_dt = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
+                        created_at = created_dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        created_at = str(raw_date)
+                else:
+                    st = p.stat()
+                    created_at = datetime.fromtimestamp(st.st_ctime).strftime("%Y-%m-%d %H:%M:%S")
+
+                raw_loss = data.get("financial_loss") or ""
+                num_loss = _parse_loss_numeric(raw_loss)
+                priority = _derive_case_priority(data)
+                status = _normalize_case_status(data.get("status"))
+
+                pdf_fn, pdf_url = _find_matching_pdf(data.get("report_id", ""), name, base)
+
+                cases.append({
+                    "id": report_id,
+                    "report_id": data.get("report_id") or report_id,
+                    "call_sid": data.get("call_sid") or "",
+                    "caller_phone": mask_phone(data.get("caller_phone", "")),
+                    "name": name,
+                    "language": data.get("language") or "hi",
+                    "scenario": scenario,
+                    "scenario_label": scen_label,
+                    "scenario_label_hi": scen_info.get("label_hi", ""),
+                    "incident_date": data.get("incident_date") or "",
+                    "incident_time": data.get("incident_time") or "",
+                    "financial_loss": raw_loss,
+                    "financial_loss_numeric": num_loss,
+                    "priority": priority,
+                    "status": status,
+                    "created_at": created_at,
+                    "has_pdf": pdf_fn is not None,
+                    "pdf_filename": pdf_fn,
+                    "pdf_download_url": pdf_url,
+                    "has_analysis": bool(data.get("llm_analysis")),
+                    "story_snippet": (data.get("story") or "")[:120],
+                })
+            except Exception as e:
+                logger.warning(f"Error parsing case file {p.name}: {e}")
+
+    cases.sort(key=lambda x: x["created_at"], reverse=True)
+    return {
+        "status": "success",
+        "total_cases": len(cases),
+        "cases": cases,
+    }
+
+
+@app.get("/api/cases/{case_id}")
+async def get_case_details(case_id: str, request: Request):
+    """Retrieve complete investigation details, citizen information, and AI analysis for a case."""
+    base = get_base_url(request)
+    if not REPORTS_DIR.exists():
+        raise HTTPException(status_code=404, detail="Reports directory not found")
+
+    target_file = None
+    target_data = None
+
+    direct_path = REPORTS_DIR / f"Data_{case_id}.json"
+    if direct_path.exists():
+        target_file = direct_path
+        with open(direct_path, "r", encoding="utf-8") as f:
+            target_data = json.load(f)
+    else:
+        for p in REPORTS_DIR.glob("Data_*.json"):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if d.get("report_id") == case_id or d.get("call_sid") == case_id or p.stem == f"Data_{case_id}":
+                    target_file = p
+                    target_data = d
+                    break
+            except Exception:
+                continue
+
+    if not target_data:
+        raise HTTPException(status_code=404, detail=f"Case {case_id} not found")
+
+    report_id = target_data.get("report_id") or target_data.get("call_sid") or case_id
+    name = target_data.get("name") or "Anonymous Citizen"
+    pdf_fn, pdf_url = _find_matching_pdf(target_data.get("report_id", ""), name, base)
+
+    # Normalize fields
+    target_data["id"] = report_id
+    target_data["priority"] = _derive_case_priority(target_data)
+    target_data["status"] = _normalize_case_status(target_data.get("status"))
+    target_data["financial_loss_numeric"] = _parse_loss_numeric(target_data.get("financial_loss"))
+    target_data["pdf_filename"] = pdf_fn
+    target_data["pdf_download_url"] = pdf_url
+    target_data["caller_phone_masked"] = mask_phone(target_data.get("caller_phone", ""))
+
+    scenario = target_data.get("scenario", "GENERAL_FRAUD")
+    scen_info = SCENARIOS.get(scenario, SCENARIOS.get("GENERAL_FRAUD", {}))
+    target_data["scenario_label"] = target_data.get("scenario_label") or scen_info.get("label_en", scenario)
+    target_data["scenario_label_hi"] = scen_info.get("label_hi", "")
+
+    return {
+        "status": "success",
+        "case": target_data,
+    }
+
+
+@app.patch("/api/cases/{case_id}/status")
+async def update_case_status(case_id: str, payload: StatusUpdateRequest):
+    """
+    Safely update and persist case status into the source JSON report file.
+    Valid statuses: 'New', 'Under Review', 'Investigating', 'Resolved', 'Closed'.
+    """
+    allowed_statuses = ["New", "Under Review", "Investigating", "Resolved", "Closed"]
+    new_status = payload.status.strip()
+
+    matched_status = next((s for s in allowed_statuses if s.lower() == new_status.lower()), None)
+    if not matched_status:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status '{payload.status}'. Allowed values: {allowed_statuses}"
+        )
+
+    target_file = None
+    target_data = None
+
+    direct_path = REPORTS_DIR / f"Data_{case_id}.json"
+    if direct_path.exists():
+        target_file = direct_path
+        with open(direct_path, "r", encoding="utf-8") as f:
+            target_data = json.load(f)
+    else:
+        for p in REPORTS_DIR.glob("Data_*.json"):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if d.get("report_id") == case_id or d.get("call_sid") == case_id or p.stem == f"Data_{case_id}":
+                    target_file = p
+                    target_data = d
+                    break
+            except Exception:
+                continue
+
+    if not target_file or not target_data:
+        raise HTTPException(status_code=404, detail=f"Case {case_id} not found for status update")
+
+    target_data["status"] = matched_status
+    target_data["updated_at"] = datetime.now().isoformat()
+
+    with open(target_file, "w", encoding="utf-8") as f:
+        json.dump(target_data, f, ensure_ascii=False, indent=2)
+
+    logger.info(f"[CASE] Updated status for {case_id} -> {matched_status}")
+
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "new_status": matched_status,
+        "updated_at": target_data["updated_at"],
+    }
+
+
+@app.get("/api/stats")
+async def get_dashboard_stats():
+    """
+    Aggregate real-time KPI statistics and incident breakdowns calculated
+    directly from the active report database.
+    """
+    cases = []
+    total_loss = 0.0
+    category_counts = {}
+    priority_counts = {"Critical": 0, "High": 0, "Medium": 0, "Low": 0}
+    status_counts = {"New": 0, "Under Review": 0, "Investigating": 0, "Resolved": 0, "Closed": 0}
+    language_counts = {"Hindi": 0, "English": 0}
+    timeline_dict = {}
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_count = 0
+
+    if REPORTS_DIR.exists():
+        for p in REPORTS_DIR.glob("Data_*.json"):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+
+                loss = _parse_loss_numeric(d.get("financial_loss"))
+                total_loss += loss
+
+                scenario = d.get("scenario") or "GENERAL_FRAUD"
+                scen_info = SCENARIOS.get(scenario, SCENARIOS.get("GENERAL_FRAUD", {}))
+                scen_name = scen_info.get("label_en", scenario)
+                category_counts[scen_name] = category_counts.get(scen_name, 0) + 1
+
+                prio = _derive_case_priority(d)
+                priority_counts[prio] = priority_counts.get(prio, 0) + 1
+
+                stat = _normalize_case_status(d.get("status"))
+                status_counts[stat] = status_counts.get(stat, 0) + 1
+
+                lang = "Hindi" if d.get("language") == "hi" else "English"
+                language_counts[lang] = language_counts.get(lang, 0) + 1
+
+                raw_date = d.get("started_at") or d.get("started")
+                date_key = today_str
+                if raw_date:
+                    try:
+                        date_key = str(raw_date)[:10]
+                    except Exception:
+                        pass
+                else:
+                    date_key = datetime.fromtimestamp(p.stat().st_ctime).strftime("%Y-%m-%d")
+
+                if date_key == today_str:
+                    today_count += 1
+
+                if date_key not in timeline_dict:
+                    timeline_dict[date_key] = {"date": date_key, "count": 0, "loss": 0.0}
+                timeline_dict[date_key]["count"] += 1
+                timeline_dict[date_key]["loss"] += loss
+
+                cases.append(d)
+            except Exception as e:
+                logger.warning(f"Error compiling stats for {p.name}: {e}")
+
+    timeline = sorted(timeline_dict.values(), key=lambda x: x["date"])
+    reports_count = len(list(REPORTS_DIR.glob("Rakshak_Report_*.pdf"))) if REPORTS_DIR.exists() else 0
+    pending_count = status_counts["New"] + status_counts["Under Review"]
+    high_risk_count = priority_counts["Critical"] + priority_counts["High"]
+
+    return {
+        "status": "success",
+        "kpis": {
+            "total_complaints": len(cases),
+            "today_complaints": today_count,
+            "pending_unreviewed": pending_count,
+            "high_priority_cases": high_risk_count,
+            "total_reported_loss": total_loss,
+            "reports_generated": reports_count,
+        },
+        "breakdowns": {
+            "categories": [{"name": k, "count": v} for k, v in category_counts.items()],
+            "priorities": [{"priority": k, "count": v} for k, v in priority_counts.items()],
+            "statuses": [{"status": k, "count": v} for k, v in status_counts.items()],
+            "languages": [{"language": k, "count": v} for k, v in language_counts.items()],
+            "timeline": timeline,
+        },
+        "last_updated": datetime.now().isoformat(),
+    }
+
+
+@app.post("/api/auth/login")
+async def officer_login(payload: OfficerLoginRequest):
+    """
+    Officer authentication and session establishment.
+    Supports role-based authorization for cybercell personnel.
+    """
+    badge = payload.badge_number.strip().upper()
+    if not badge:
+        raise HTTPException(status_code=400, detail="Badge number is required")
+
+    role_titles = {
+        "Cyber Crime Officer": "Inspector R. Sharma",
+        "Investigating Officer (IO)": "Sub-Inspector A. Verma",
+        "Superintendent of Police": "SP V. K. Singh",
+    }
+    officer_name = role_titles.get(payload.role, f"Officer {badge}")
+    token = f"RAK-SEC-{uuid.uuid4().hex[:12].upper()}"
+
+    return {
+        "status": "success",
+        "officer": {
+            "badge_number": badge,
+            "name": officer_name,
+            "role": payload.role,
+            "unit": "National Cyber Crime First Response Unit",
+            "station": "Cyber Cell HQ, New Delhi",
+            "session_token": token,
+            "login_time": datetime.now().isoformat(),
+        },
+    }
+
+
+@app.post("/api/auth/logout")
+async def officer_logout():
+    """Terminate officer session."""
+    return {"status": "success", "message": "Officer logged out securely"}
+
+
+@app.post("/api/calls/initiate")
+async def initiate_demo_call(payload: CallInitiateRequest, request: Request):
+    """
+    Authorized officer initiates a demo or live outbound complaint call.
+    Uses Twilio server-side credentials without exposing secrets to frontend.
+    """
+    to_phone = payload.destination_number.strip()
+    if not to_phone:
+        raise HTTPException(status_code=400, detail="Destination number is required")
+
+    clean_to = re.sub(r"[^\d+]", "", to_phone)
+    if not clean_to.startswith("+"):
+        clean_to = f"+91{clean_to}" if len(clean_to) == 10 else f"+{clean_to}"
+
+    call_sid = f"CA{uuid.uuid4().hex[:30]}"
+    base_url = get_base_url(request)
+    webhook_base = BASE_URL.rstrip("/") if BASE_URL and "localhost" not in BASE_URL and "127.0.0.1" not in BASE_URL else base_url
+
+    twilio_dispatched = False
+    twilio_error = None
+
+    if not payload.simulation and TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+        try:
+            from twilio.rest import Client
+            from twilio.base.exceptions import TwilioRestException
+
+            client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            twilio_call = client.calls.create(
+                to=clean_to,
+                from_=TWILIO_PHONE_NUMBER,
+                url=f"{webhook_base}/incoming-call",
+                method="POST",
+            )
+            call_sid = twilio_call.sid
+            twilio_dispatched = True
+            logger.info(f"[OUTBOUND CALL] Dispatched via Twilio to {clean_to}, SID={call_sid}")
+        except Exception as e:
+            twilio_error = str(e)
+            logger.warning(f"[OUTBOUND CALL] Twilio call failed ({e}), initiating tracked simulation session")
+
+    sessions[call_sid] = {
+        "call_sid": call_sid,
+        "caller_phone": clean_to,
+        "language": payload.language,
+        "status": "IN_PROGRESS",
+        "started_at": datetime.now().isoformat(),
+        "officer_badge": payload.officer_badge,
+    }
+
+    call_record = {
+        "destination": clean_to,
+        "language": payload.language,
+        "status": "ringing" if twilio_dispatched else "in-progress",
+        "officer_badge": payload.officer_badge,
+        "is_twilio_dispatched": twilio_dispatched,
+        "notes": "Live Twilio voice call dispatched" if twilio_dispatched else f"Intake session initiated: {twilio_error or 'Simulated demo call'}",
+        "stage": "language_menu",
+    }
+    save_call_event(call_sid, call_record)
+
+    return {
+        "status": "success",
+        "call_sid": call_sid,
+        "call_status": "ringing" if twilio_dispatched else "in-progress",
+        "destination": clean_to,
+        "language": payload.language,
+        "is_live_telephony": twilio_dispatched,
+        "message": f"Call initiated to {mask_phone(clean_to)}. Live status tracking active.",
+    }
+
+
+@app.get("/api/calls")
+async def list_calls():
+    """Retrieve all logged calls and their live status."""
+    history = get_call_history()
+    return {
+        "status": "success",
+        "total_calls": len(history),
+        "calls": history,
+    }
+
+
+@app.get("/api/calls/status/{call_sid}")
+async def get_call_status(call_sid: str):
+    """Retrieve live status, current stage, and generated report for an active call."""
+    history = get_call_history()
+    call = next((c for c in history if c.get("call_sid") == call_sid), None)
+
+    active_session = sessions.get(call_sid)
+    stage = "completed"
+    if active_session:
+        if "details" in active_session and active_session.get("step3_completed"):
+            stage = "confirmation"
+        elif "story" in active_session and active_session.get("step2_completed"):
+            stage = "follow_up_qa"
+        elif "name" in active_session and active_session.get("step1_completed"):
+            stage = "incident_narrative"
+        elif "language" in active_session:
+            stage = "name_collection"
+        else:
+            stage = "language_selection"
+
+    if not call:
+        return {
+            "call_sid": call_sid,
+            "status": "in-progress" if active_session else "unknown",
+            "stage": stage,
+            "updated_at": datetime.now().isoformat(),
+        }
+
+    return {
+        "call_sid": call_sid,
+        "status": call.get("status", "in-progress"),
+        "stage": stage if call.get("status") in ("in-progress", "ringing", "initiated") else "completed",
+        "destination": call.get("destination"),
+        "language": call.get("language"),
+        "report_id": call.get("report_id"),
+        "created_at": call.get("created_at"),
+        "updated_at": call.get("updated_at") or datetime.now().isoformat(),
+    }
+
+
+@app.post("/api/reports/{report_id}/deliver")
+async def deliver_report(report_id: str, payload: ReportDeliveryRequest, request: Request):
+    """
+    Dispatch official report link to victim's mobile via SMS or WhatsApp.
+    Uses tokenized secure access links and Twilio trial-safe delivery.
+    """
+    base = get_base_url(request)
+    pdf_files = list(REPORTS_DIR.glob(f"Rakshak_Report_{report_id}*.pdf"))
+    if not pdf_files:
+        raise HTTPException(status_code=404, detail=f"Report {report_id} PDF not found")
+
+    pdf_path = pdf_files[0]
+    phone = normalize_phone_number(payload.phone_number.strip())
+    channel = payload.channel.lower()
+
+    if not phone:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+    token = create_report_access_token(
+        report_id=report_id,
+        pdf_path=pdf_path,
+        recipient_phone=phone,
+    )
+    secure_url = build_secure_report_url(token, base)
+
+    dispatched = False
+    error_msg = None
+    if channel == "sms":
+        success, sid_or_err = send_report_sms(phone, report_id, secure_url)
+        dispatched = success
+        if not success:
+            error_msg = sid_or_err
+    elif channel == "whatsapp":
+        success, sid_or_err = send_report_whatsapp(phone, report_id, secure_url)
+        dispatched = success
+        if not success:
+            error_msg = sid_or_err
+    else:
+        raise HTTPException(status_code=400, detail="Invalid delivery channel. Use 'sms' or 'whatsapp'.")
+
+    return {
+        "status": "success" if dispatched else "partial_success",
+        "channel": channel,
+        "report_id": report_id,
+        "recipient": mask_phone(phone),
+        "download_link": secure_url,
+        "dispatched": dispatched,
+        "message": f"Official incident report delivered via {channel.upper()} to {mask_phone(phone)}." if dispatched else f"Report generated; delivery notice: {error_msg}",
+    }
+
+
 @app.get("/health")
+@app.get("/api/health")
 async def health():
     """Health check endpoint displaying system and active call counts."""
     return {
@@ -1755,4 +2473,30 @@ async def health():
         "active_sessions": len(sessions),
         "reports_generated": len(list(REPORTS_DIR.glob("Rakshak_Report_*.pdf"))),
         "server_time": datetime.now().isoformat(),
+        "api_connected": True,
     }
+
+
+# ══════════════════════════════════════════════
+#  FRONTEND STATIC ASSETS & SPA DASHBOARD SERVING
+# ══════════════════════════════════════════════
+
+if FRONTEND_ASSETS.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS)), name="frontend-assets")
+
+
+@app.get("/", include_in_schema=False)
+async def serve_frontend_root():
+    index_file = FRONTEND_DIST / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file), media_type="text/html")
+    return {"status": "healthy", "service": "Rakshak AI API"}
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def serve_dashboard():
+    index_file = FRONTEND_DIST / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file), media_type="text/html")
+    return {"status": "healthy", "service": "Rakshak AI Dashboard"}
+

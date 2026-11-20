@@ -11,7 +11,7 @@ interface DemoCallSectionProps {
 export const DemoCallSection: React.FC<DemoCallSectionProps> = ({ officer, onCallInitiated }) => {
   const [destinationNumber, setDestinationNumber] = useState<string>('+91 98765 43210');
   const [language, setLanguage] = useState<'hi' | 'en'>('hi');
-  const [isSimulation, setIsSimulation] = useState<boolean>(false);
+  const [isSimulation, setIsSimulation] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -195,8 +195,8 @@ export const DemoCallSection: React.FC<DemoCallSectionProps> = ({ officer, onCal
                 onChange={(e) => setIsSimulation(e.target.value === 'sim')}
                 className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 bg-white focus:border-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-700"
               >
-                <option value="auto">Live Outbound (Twilio / Auto)</option>
-                <option value="sim">Virtual Walkthrough (Mock)</option>
+                <option value="sim">Virtual Simulation (No Twilio Required)</option>
+                <option value="auto">Live Outbound (Twilio Telephony)</option>
               </select>
             </div>
           </div>

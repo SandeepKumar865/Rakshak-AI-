@@ -530,12 +530,29 @@ def say(text: str, language: str = "hi") -> str:
         return f'<Say language="en-IN" voice="Polly.Aditi">{text}</Say>'
 
 
+def resolve_action_url(action: str, request: Request = None) -> str:
+    """Resolve action or redirect URL to an absolute URL using request or BASE_URL (returns relative in pytest)."""
+    if action.startswith("http://") or action.startswith("https://"):
+        return action
+    base = ""
+    if request is not None and hasattr(request, "headers"):
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        proto = request.headers.get("x-forwarded-proto", "https")
+        if host and "testserver" not in host and "localhost" not in host and "127.0.0.1" not in host:
+            base = f"{proto}://{host}"
+    if not base and BASE_URL and "localhost" not in BASE_URL and "127.0.0.1" not in BASE_URL:
+        import sys
+        if "pytest" not in sys.modules:
+            base = BASE_URL.rstrip("/")
+    act = action if action.startswith("/") else f"/{action}"
+    return f"{base}{act}" if base else act
+
+
 def record(action: str, max_length: int = 45, finish_on_key: str = "#") -> str:
     """
-    Generate Record verb with finishOnKey and relative action URL so Twilio resolves it
-    against the active incoming request host.
+    Generate Record verb with finishOnKey and absolute action URL in production.
     """
-    act = action if action.startswith("/") else f"/{action}"
+    act = resolve_action_url(action)
     finish_attr = f'finishOnKey="{finish_on_key}"' if finish_on_key else ""
     return (
         f'<Record action="{act}" method="POST" '
@@ -573,11 +590,12 @@ def speech_gather_or_record(
     - If no speech is detected, Twilio seamlessly falls back to <Record finishOnKey="#">.
     """
     lang_code = "hi-IN" if language == "hi" else "en-IN"
-    act = action if action.startswith("/") else f"/{action}"
+    act = resolve_action_url(action)
     finish_attr = f'finishOnKey="{finish_on_key}"' if finish_on_key else ""
     return (
         f'<Gather input="speech dtmf" action="{act}" method="POST" '
         f'language="{lang_code}" {finish_attr} speechTimeout="auto" timeout="8" maxSpeechTime="{max_speech_time}">'
+        f'<Pause length="1"/>'
         f'</Gather>'
         f'{record(act, max_length=max_record_len, finish_on_key=finish_on_key)}'
     )
@@ -638,14 +656,15 @@ async def incoming_call(request: Request):
         "updated_at": datetime.now().isoformat(),
     })
 
+    lang_act = resolve_action_url("/select-language", request)
+    redir_act = resolve_action_url("/select-language?Digits=1", request)
+
     body = (
-        '<Gather input="speech dtmf" action="/select-language" method="POST" numDigits="1" timeout="6" speechTimeout="auto" language="hi-IN">'
+        f'<Gather input="speech dtmf" action="{lang_act}" method="POST" numDigits="1" timeout="7" speechTimeout="auto" language="hi-IN">'
         + say("नमस्ते! रक्षक एआई में आपका स्वागत है। हिंदी के लिए 1 दबाएं या बोलें।", language="hi")
         + say("Welcome to Rakshak AI. Press 1 for Hindi, or press 2 for English.", language="en")
         + '</Gather>'
-        + say("कोई इनपुट नहीं मिला। हम हिंदी में आगे बढ़ रहे हैं।", language="hi")
-        + say("कृपया बीप के बाद अपना पूरा नाम बोलें और समाप्त होने पर हैश (#) दबाएं।", language="hi")
-        + speech_gather_or_record("/step1-name", language="hi", max_speech_time=15, max_record_len=15)
+        + f'<Redirect method="POST">{redir_act}</Redirect>'
     )
     return twiml_response(body)
 

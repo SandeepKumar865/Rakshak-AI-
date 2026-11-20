@@ -9,14 +9,15 @@ interface DemoCallSectionProps {
 }
 
 export const DemoCallSection: React.FC<DemoCallSectionProps> = ({ officer, onCallInitiated }) => {
-  const [destinationNumber, setDestinationNumber] = useState<string>('+91 98765 43210');
+  const [destinationNumber, setDestinationNumber] = useState<string>('+91 93054 96367');
   const [language, setLanguage] = useState<'hi' | 'en'>('hi');
-  const [isSimulation, setIsSimulation] = useState<boolean>(true);
+  const [isSimulation, setIsSimulation] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const sampleNumbers = [
+    { label: 'Verified Phone (+91 93054 96367)', number: '+91 93054 96367', lang: 'hi' as const },
     { label: 'OTP Debit Scam (+91 98765 43210)', number: '+91 98765 43210', lang: 'hi' as const },
     { label: 'Telegram Job Fraud (+91 98110 54321)', number: '+91 98110 54321', lang: 'en' as const },
     { label: 'OLX Payment QR Scam (+91 94140 22319)', number: '+91 94140 22319', lang: 'hi' as const },

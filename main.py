@@ -639,11 +639,13 @@ async def incoming_call(request: Request):
     })
 
     body = (
-        '<Gather action="/select-language" method="POST" numDigits="1" timeout="7">'
-        + say("नमस्ते! रक्षक एआई में आपका स्वागत है। हिंदी में बात करने के लिए 1 दबाएं।", language="hi")
+        '<Gather input="speech dtmf" action="/select-language" method="POST" numDigits="1" timeout="6" speechTimeout="auto" language="hi-IN">'
+        + say("नमस्ते! रक्षक एआई में आपका स्वागत है। हिंदी के लिए 1 दबाएं या बोलें।", language="hi")
         + say("Welcome to Rakshak AI. Press 1 for Hindi, or press 2 for English.", language="en")
         + '</Gather>'
-        + f'<Redirect method="POST">/retry-language?CallSid={call_sid}</Redirect>'
+        + say("कोई इनपुट नहीं मिला। हम हिंदी में आगे बढ़ रहे हैं।", language="hi")
+        + say("कृपया बीप के बाद अपना पूरा नाम बोलें और समाप्त होने पर हैश (#) दबाएं।", language="hi")
+        + speech_gather_or_record("/step1-name", language="hi", max_speech_time=15, max_record_len=15)
     )
     return twiml_response(body)
 
@@ -683,26 +685,21 @@ async def retry_language(request: Request, CallSid: str = ""):
 
 @app.post("/select-language")
 async def select_language(request: Request):
-    """Processes DTMF selection: 1 for Hindi, 2 for English."""
+    """Processes DTMF or Speech selection: 1 for Hindi, 2 for English."""
     form = await request.form()
     call_sid = form.get("CallSid", "unknown")
     digits = (form.get("Digits") or "").strip()
+    speech = (form.get("SpeechResult") or "").lower().strip()
 
     if call_sid not in sessions:
         sessions[call_sid] = {"call_sid": call_sid, "started_at": datetime.now().isoformat()}
 
     session = sessions[call_sid]
 
-    if digits == "1":
-        session["language"] = "hi"
-        body = (
-            say("आपने हिंदी चुनी है। रक्षक एआई आपकी सहायता के लिए तैयार है।", language="hi")
-            + say("कृपया बीप के बाद अपना पूरा नाम बोलें और समाप्त होने पर हैश (#) दबाएं।", language="hi")
-            + speech_gather_or_record("/step1-name", language="hi", max_speech_time=15, max_record_len=15)
-        )
-        return twiml_response(body)
+    is_english = digits == "2" or "english" in speech or "two" in speech or "अंग्रेजी" in speech
+    is_hindi = digits == "1" or "hindi" in speech or "हिंदी" in speech or "एक" in speech or "haan" in speech or "हाँ" in speech
 
-    elif digits == "2":
+    if is_english:
         session["language"] = "en"
         save_call_event(call_sid, {
             "language": "en",
@@ -716,9 +713,23 @@ async def select_language(request: Request):
         )
         return twiml_response(body)
 
+    elif is_hindi or (not digits and not speech):
+        session["language"] = "hi"
+        save_call_event(call_sid, {
+            "language": "hi",
+            "stage": "name_collection",
+            "status": "in-progress",
+        })
+        body = (
+            say("आपने हिंदी चुनी है। रक्षक एआई आपकी सहायता के लिए तैयार है।", language="hi")
+            + say("कृपया बीप के बाद अपना पूरा नाम बोलें और समाप्त होने पर हैश (#) दबाएं।", language="hi")
+            + speech_gather_or_record("/step1-name", language="hi", max_speech_time=15, max_record_len=15)
+        )
+        return twiml_response(body)
+
     else:
         body = (
-            '<Gather action="/select-language" method="POST" numDigits="1" timeout="7">'
+            '<Gather input="speech dtmf" action="/select-language" method="POST" numDigits="1" timeout="7">'
             + say("अमान्य विकल्प। हिंदी के लिए 1 या English के लिए 2 दबाएं।", language="hi")
             + say("Invalid option. Press 1 for Hindi or 2 for English.", language="en")
             + '</Gather>'
@@ -2321,7 +2332,6 @@ async def initiate_demo_call(payload: CallInitiateRequest, request: Request):
                 to=clean_to,
                 from_=TWILIO_PHONE_NUMBER,
                 url=f"{webhook_base}/incoming-call",
-                method="POST",
             )
             call_sid = twilio_call.sid
             twilio_dispatched = True
